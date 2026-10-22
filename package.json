@@ -1,0 +1,11 @@
+{
+  "name": "semtos-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev --prefix Semtos -- -p 4000 -H 0.0.0.0",
+    "build": "npm run build --prefix Semtos",
+    "start": "npm run start --prefix Semtos -- -p 4000",
+    "v2x": "node v2x-server.js"
+  }
+}
