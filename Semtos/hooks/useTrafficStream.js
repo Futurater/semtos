@@ -13,21 +13,108 @@ export function useTrafficStream(useMockData = true) {
     ambulancePosition: { x: AMB_START_X, y: 0.02, z: AMB_LANE_Z, rotation: -Math.PI / 2 },
     isSimulationRunning: false,
     isFrozen: false,
+    v2xConnected: false,
+    networkMode: 'CLOUD_ONLINE', // 'CLOUD_ONLINE' | 'BLE_FALLBACK'
+    yoloQueue: {
+      queueCount: 4,
+      detectedVehicles: 6,
+      queueDensity: 'MODERATE',
+      recommendedHoldSeconds: 23,
+      deadlockDetected: false,
+      source: 'SIMULATED_DEFAULT',
+    },
+    routing: {
+      deadlockRerouteActive: false,
+      activeRouteType: 'PRIMARY',
+      bypassName: 'Residency Rd – St. Marks Rd Emergency Bypass',
+    },
+    telemetry: {
+      unitId: 'AMB-108-BLR',
+      speedKmh: 0,
+      heading: 275,
+      distanceToSignal: 450,
+      etaSeconds: 0,
+      rssiDbm: -52,
+      dispatchLatencyMs: 3.2,
+    },
+    esp32Signal: {
+      ledState: 'RED',
+      buzzerActive: false,
+      holdSeconds: 23,
+    },
     auditLogs: [],
   });
 
-  const simRunningRef        = useRef(false);
-  const isFrozenRef          = useRef(false);
-  const onAvenueCallbackRef  = useRef(null);
-  const onClearedCallbackRef = useRef(null);
-  const avenueEventFiredRef  = useRef(false);
-  const clearedEventFiredRef = useRef(false);
-  const xRef                 = useRef(AMB_START_X);
-  const currentSpeedRef      = useRef(AMB_SPEED_DX);
-  const vehiclesRef          = useRef(null);
-  const wsRef                = useRef(null);
+  const simRunningRef          = useRef(false);
+  const isFrozenRef            = useRef(false);
+  const onAvenueCallbackRef    = useRef(null);
+  const onClearedCallbackRef   = useRef(null);
+  const onNormalCycleCallbackRef = useRef(null);
+  const avenueEventFiredRef    = useRef(false);
+  const clearedEventFiredRef   = useRef(false);
+  const xRef                   = useRef(AMB_START_X);
+  const currentSpeedRef        = useRef(AMB_SPEED_DX);
+  const vehiclesRef            = useRef(null);
+  const wsRef                  = useRef(null);
 
-  // ---- Connect to V2X Bridge WebSocket Server --------------------
+  const update = useCallback((patch) => {
+    setState((prev) => ({ ...prev, ...patch }));
+  }, []);
+
+  const addLog = useCallback((msg, category = 'TWIN') => {
+    setState((prev) => {
+      const logs = [
+        ...prev.auditLogs,
+        {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          timestamp: '[' + new Date().toTimeString().split(' ')[0] + ']',
+          category,
+          message: msg,
+        },
+      ];
+      if (logs.length > 60) logs.shift();
+      return { ...prev, auditLogs: logs };
+    });
+  }, []);
+
+  const sendV2X = useCallback((payloadOrEventName) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      try {
+        const packet =
+          typeof payloadOrEventName === 'string'
+            ? { event: payloadOrEventName, timestamp: Date.now() }
+            : { ...payloadOrEventName, timestamp: Date.now() };
+        wsRef.current.send(JSON.stringify(packet));
+      } catch (e) {
+        console.warn('[3D-TWIN] Failed to broadcast V2X event:', e);
+      }
+    }
+  }, []);
+
+  // Trigger 3D Twin Ambulance Dispatch (callable from UI, keyboard, or incoming Phone 1 event)
+  const startTwinDispatch = useCallback(
+    (broadcastToServer = true) => {
+      if (simRunningRef.current) return;
+      simRunningRef.current = true;
+      avenueEventFiredRef.current = true;
+      clearedEventFiredRef.current = false;
+      xRef.current = AMB_START_X;
+      currentSpeedRef.current = AMB_SPEED_DX;
+
+      addLog('Ambulance dispatched — West corridor preempted GREEN.', 'DISPATCH');
+      update({ isSimulationRunning: true });
+
+      if (onAvenueCallbackRef.current) {
+        onAvenueCallbackRef.current();
+      }
+      if (broadcastToServer) {
+        sendV2X('V2X_ALERT_TRIGGER');
+      }
+    },
+    [addLog, update, sendV2X]
+  );
+
+  // ---- Connect to Authoritative V2X Server on Port 4081 --------------------
   useEffect(() => {
     let ws = null;
     let reconnectTimer = null;
@@ -35,23 +122,188 @@ export function useTrafficStream(useMockData = true) {
 
     function connectWS() {
       if (unmounted) return;
+      const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
       try {
-        ws = new WebSocket('ws://localhost:4081');
+        ws = new WebSocket(`ws://${host}:4081`);
         wsRef.current = ws;
 
         ws.onopen = () => {
-          console.log('[3D-TWIN] 🔗 Connected to V2X WebSocket Bridge Server on port 4081');
+          update({ v2xConnected: true });
+          ws.send(
+            JSON.stringify({
+              event: 'REGISTER_CLIENT',
+              clientType: 'DASHBOARD',
+            })
+          );
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+
+            switch (data.event) {
+              case 'SEMTOS_INIT_STATE': {
+                if (data.state) {
+                  setState((prev) => ({
+                    ...prev,
+                    networkMode: data.state.networkMode || prev.networkMode,
+                    yoloQueue: data.state.yoloQueue || prev.yoloQueue,
+                    routing: data.state.routing || prev.routing,
+                    esp32Signal: {
+                      ledState: data.state.signal?.esp32LedState || 'RED',
+                      buzzerActive: Boolean(data.state.signal?.buzzerActive),
+                      holdSeconds: data.state.signal?.greenHoldSeconds || 23,
+                    },
+                    auditLogs: Array.isArray(data.state.auditLogs)
+                      ? data.state.auditLogs.map((l) => ({
+                          id: l.id,
+                          timestamp: `[${l.timestamp}]`,
+                          category: l.category || 'V2X',
+                          message: l.message,
+                        }))
+                      : prev.auditLogs,
+                  }));
+                }
+                break;
+              }
+
+              case 'SIMULATION_STARTED':
+              case 'V2X_ALERT_TRIGGER': {
+                if (!simRunningRef.current) {
+                  startTwinDispatch(false);
+                } else if (onAvenueCallbackRef.current) {
+                  onAvenueCallbackRef.current();
+                }
+                setState((prev) => ({
+                  ...prev,
+                  esp32Signal: {
+                    ...prev.esp32Signal,
+                    ledState: 'GREEN',
+                    buzzerActive: true,
+                  },
+                }));
+                break;
+              }
+
+              case 'V2X_CLEARANCE_CONFIRMED': {
+                if (onClearedCallbackRef.current) {
+                  onClearedCallbackRef.current();
+                }
+                setState((prev) => ({
+                  ...prev,
+                  esp32Signal: {
+                    ...prev.esp32Signal,
+                    ledState: 'RED',
+                    buzzerActive: false,
+                  },
+                }));
+                break;
+              }
+
+              case 'AMBULANCE_TELEMETRY':
+              case 'GPS_BROADCAST': {
+                setState((prev) => ({
+                  ...prev,
+                  networkMode: data.networkMode || prev.networkMode,
+                  telemetry: {
+                    unitId: data.unitId || prev.telemetry.unitId,
+                    speedKmh: data.speedKmh ?? prev.telemetry.speedKmh,
+                    heading: data.heading ?? prev.telemetry.heading,
+                    distanceToSignal: data.distanceToSignal ?? prev.telemetry.distanceToSignal,
+                    etaSeconds: data.etaSeconds ?? prev.telemetry.etaSeconds,
+                    rssiDbm: data.rssiDbm ?? prev.telemetry.rssiDbm,
+                    dispatchLatencyMs: data.dispatchLatencyMs ?? prev.telemetry.dispatchLatencyMs,
+                  },
+                }));
+                if (data.preemptionActive && !simRunningRef.current) {
+                  startTwinDispatch(false);
+                }
+                break;
+              }
+
+              case 'YOLO_QUEUE_STATE': {
+                setState((prev) => ({
+                  ...prev,
+                  yoloQueue: data.yoloQueue || prev.yoloQueue,
+                  routing: data.routing || prev.routing,
+                  esp32Signal: {
+                    ...prev.esp32Signal,
+                    holdSeconds:
+                      data.signal?.greenHoldSeconds ||
+                      data.yoloQueue?.recommendedHoldSeconds ||
+                      prev.esp32Signal.holdSeconds,
+                  },
+                }));
+                break;
+              }
+
+              case 'V2X_DEADLOCK_REROUTE': {
+                setState((prev) => ({
+                  ...prev,
+                  routing: {
+                    ...prev.routing,
+                    deadlockRerouteActive: Boolean(data.deadlockDetected),
+                    activeRouteType: data.deadlockDetected ? 'BYPASS' : 'PRIMARY',
+                    bypassName: data.bypassName || prev.routing.bypassName,
+                  },
+                }));
+                break;
+              }
+
+              case 'NETWORK_MODE_CHANGED': {
+                setState((prev) => ({
+                  ...prev,
+                  networkMode: data.networkMode || prev.networkMode,
+                }));
+                break;
+              }
+
+              case 'ESP32_SIGNAL_COMMAND': {
+                setState((prev) => ({
+                  ...prev,
+                  esp32Signal: {
+                    ledState: data.ledState || prev.esp32Signal.ledState,
+                    buzzerActive: Boolean(data.buzzer),
+                    holdSeconds: data.holdSeconds ?? prev.esp32Signal.holdSeconds,
+                  },
+                }));
+                break;
+              }
+
+              case 'AUDIT_LOG_APPEND': {
+                if (data.log) {
+                  setState((prev) => {
+                    const nextLogs = [
+                      ...prev.auditLogs,
+                      {
+                        id: data.log.id,
+                        timestamp: `[${data.log.timestamp}]`,
+                        category: data.log.category || 'V2X',
+                        message: data.log.message,
+                      },
+                    ];
+                    if (nextLogs.length > 60) nextLogs.shift();
+                    return { ...prev, auditLogs: nextLogs };
+                  });
+                }
+                break;
+              }
+
+              default:
+                break;
+            }
+          } catch (_) {}
         };
 
         ws.onclose = () => {
-          console.log('[3D-TWIN] 🔌 Disconnected from V2X Bridge Server, retrying in 3s...');
+          update({ v2xConnected: false });
           if (!unmounted) {
             reconnectTimer = setTimeout(connectWS, 3000);
           }
         };
 
         ws.onerror = () => {
-          // Silent fallback if server is starting
+          update({ v2xConnected: false });
         };
       } catch (_) {
         if (!unmounted) {
@@ -67,41 +319,12 @@ export function useTrafficStream(useMockData = true) {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (ws) ws.close();
     };
-  }, []);
-
-  const sendV2X = useCallback((eventName) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      try {
-        wsRef.current.send(JSON.stringify({ event: eventName, timestamp: Date.now() }));
-        console.log(`[3D-TWIN] 📡 Broadcasted V2X Event: ${eventName}`);
-      } catch (e) {
-        console.warn('[3D-TWIN] Failed to broadcast V2X event:', e);
-      }
-    }
-  }, []);
-
-  const update = useCallback((patch) => {
-    setState(prev => ({ ...prev, ...patch }));
-  }, []);
-
-  const addLog = useCallback((msg) => {
-    setState(prev => {
-      const logs = [...prev.auditLogs, {
-        id: Date.now() + Math.random(),
-        timestamp: '[' + new Date().toTimeString().split(' ')[0] + ']',
-        message: msg,
-      }];
-      if (logs.length > 50) logs.shift();
-      return { ...prev, auditLogs: logs };
-    });
-  }, []);
-
-  const onNormalCycleCallbackRef = useRef(null);
+  }, [update, startTwinDispatch]);
 
   // page.js calls this once to wire up signal-hook callbacks
   const registerCallbacks = useCallback((onAvenue, onCleared, onNormal) => {
-    onAvenueCallbackRef.current     = onAvenue;
-    onClearedCallbackRef.current    = onCleared;
+    onAvenueCallbackRef.current      = onAvenue;
+    onClearedCallbackRef.current     = onCleared;
     onNormalCycleCallbackRef.current = onNormal || null;
   }, []);
 
@@ -109,80 +332,78 @@ export function useTrafficStream(useMockData = true) {
     vehiclesRef.current = ref;
   }, []);
 
+  // Operator controls exposed to Dashboard UI
+  const toggleNetworkMode = useCallback(() => {
+    const nextMode = state.networkMode === 'CLOUD_ONLINE' ? 'BLE_FALLBACK' : 'CLOUD_ONLINE';
+    update({ networkMode: nextMode });
+    sendV2X({ event: 'NETWORK_MODE_TOGGLE', networkMode: nextMode });
+  }, [state.networkMode, update, sendV2X]);
+
+  const updateYoloQueue = useCallback(
+    (queueCount, source = 'DASHBOARD_SIMULATOR') => {
+      sendV2X({
+        event: 'YOLO_QUEUE_UPDATE',
+        queueCount: Number(queueCount),
+        source,
+      });
+    },
+    [sendV2X]
+  );
+
   // ENTER key: dispatch ambulance  |  N key: start normal cycle  |  F key: freeze
   useEffect(() => {
     const onKey = (e) => {
       if (e.code === 'Enter') {
         e.preventDefault();
-        if (simRunningRef.current) return; // already running, ignore
-        simRunningRef.current = true;
-        avenueEventFiredRef.current  = true; // Fire immediately on dispatch
-        clearedEventFiredRef.current = false;
-        xRef.current = AMB_START_X;
-        currentSpeedRef.current = AMB_SPEED_DX;
-        addLog('Ambulance dispatched — heading East on Main Avenue.');
-        update({ isSimulationRunning: true });
-        
-        // Signal hook: immediately preempt signals on dispatch
-        if (onAvenueCallbackRef.current) {
-          onAvenueCallbackRef.current();
-        }
-
-        // Broadcast V2X alert immediately to driver companion phones
-        sendV2X('V2X_ALERT_TRIGGER');
+        startTwinDispatch(true);
       }
       if (e.code === 'KeyN') {
         e.preventDefault();
-        // Jump straight to normal cycle
         if (onNormalCycleCallbackRef.current) {
           onNormalCycleCallbackRef.current();
-          addLog('Normal cycle activated by operator.');
+          addLog('Normal cycle activated by operator.', 'SIGNAL');
         }
       }
       if (e.code === 'KeyF') {
         isFrozenRef.current = !isFrozenRef.current;
         update({ isFrozen: isFrozenRef.current });
-        addLog('System ' + (isFrozenRef.current ? 'FROZEN' : 'UNFROZEN') + '.');
+        addLog('System ' + (isFrozenRef.current ? 'FROZEN' : 'UNFROZEN') + '.', 'SYSTEM');
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [addLog, update, sendV2X]);
+  }, [addLog, update, startTwinDispatch]);
 
-  // Ambulance movement loop with active vehicle anti-collision safety
+  // Ambulance 3D movement loop with active vehicle anti-collision safety
   useEffect(() => {
     if (!useMockData) return;
-    addLog('System ready. Press ENTER to dispatch ambulance.');
+    addLog('System ready. Press ENTER or use /ambulance phone client to dispatch.');
     const interval = setInterval(() => {
       if (!simRunningRef.current || isFrozenRef.current) return;
-      
+
       const currentX = xRef.current;
       const ambZ = AMB_LANE_Z;
 
-      // Check if any car is directly obstructing the ambulance path ahead
       let isObstructed = false;
-      const vehicleList = vehiclesRef.current?.current || (Array.isArray(vehiclesRef.current) ? vehiclesRef.current : null);
-      
+      const vehicleList =
+        vehiclesRef.current?.current ||
+        (Array.isArray(vehiclesRef.current) ? vehiclesRef.current : null);
+
       if (vehicleList && vehicleList.length > 0) {
         for (let i = 0; i < vehicleList.length; i++) {
           const veh = vehicleList[i];
           if (!veh || !veh.pos) continue;
 
-          // 1. Eastbound cars on the same avenue:
           if (veh.type === 'E') {
             const dx = veh.pos.x - currentX;
             const dz = Math.abs(veh.pos.z - ambZ);
-            // If vehicle is in front (dx between 0 and 7.5 units) and still occupying the central corridor (dz < 1.85)
             if (dx > 0 && dx < 7.5 && dz < 1.85) {
               isObstructed = true;
               break;
             }
-          } 
-          // 2. Cross-traffic cars (North/South/West) traversing the intersection
-          else {
+          } else {
             const dx = Math.abs(veh.pos.x - currentX);
             const dz = Math.abs(veh.pos.z - ambZ);
-            // If near the junction and vehicle is in the intersection path
             if (dx < 5.0 && dz < 2.5) {
               isObstructed = true;
               break;
@@ -191,11 +412,8 @@ export function useTrafficStream(useMockData = true) {
         }
       }
 
-      // Target speed: approach cruising (0.44 u/tick = ~8.8 u/s),
-      // post-junction exit speed (0.62 u/tick = ~12.4 u/s)
       const targetMaxSpeed = currentX >= CLEARED_X ? 0.62 : AMB_SPEED_DX;
 
-      // Smooth deceleration if obstructed ahead; smooth acceleration to target speed when path is clear
       if (isObstructed) {
         currentSpeedRef.current = Math.max(0, currentSpeedRef.current - 0.08);
       } else {
@@ -208,21 +426,20 @@ export function useTrafficStream(useMockData = true) {
 
       if (!avenueEventFiredRef.current && x >= AVE_ENTRY_X) {
         avenueEventFiredRef.current = true;
-        addLog('Ambulance on avenue — West corridor GREEN.');
+        addLog('Ambulance on avenue — West corridor GREEN.', 'PREEMPT');
         if (onAvenueCallbackRef.current) onAvenueCallbackRef.current();
       }
       if (!clearedEventFiredRef.current && x >= CLEARED_X) {
         clearedEventFiredRef.current = true;
-        addLog('Ambulance cleared junction — sequential release begins.');
+        addLog('Ambulance cleared junction — sequential release begins.', 'CLEARANCE');
         if (onClearedCallbackRef.current) onClearedCallbackRef.current();
-        // Broadcast clearance event to mobile app for Thank You screen
         sendV2X('V2X_CLEARANCE_CONFIRMED');
       }
       if (x > AMB_WRAP_X) {
         simRunningRef.current = false;
         xRef.current = AMB_START_X;
         currentSpeedRef.current = AMB_SPEED_DX;
-        addLog('Ambulance exited. Press ENTER for next run.');
+        addLog('Ambulance exited corridor. Ready for next dispatch.', 'SYSTEM');
         update({
           isSimulationRunning: false,
           ambulancePosition: { x: AMB_START_X, y: 0.02, z: AMB_LANE_Z, rotation: -Math.PI / 2 },
@@ -238,9 +455,18 @@ export function useTrafficStream(useMockData = true) {
     ambulancePosition: state.ambulancePosition,
     isSimulationRunning: state.isSimulationRunning,
     isFrozen: state.isFrozen,
+    v2xConnected: state.v2xConnected,
+    networkMode: state.networkMode,
+    yoloQueue: state.yoloQueue,
+    routing: state.routing,
+    telemetry: state.telemetry,
+    esp32Signal: state.esp32Signal,
     auditLogs: state.auditLogs,
-    isPreempted: false,
+    isPreempted: state.esp32Signal.ledState === 'GREEN',
     registerCallbacks,
     registerVehiclesRef,
+    startTwinDispatch,
+    toggleNetworkMode,
+    updateYoloQueue,
   };
 }
