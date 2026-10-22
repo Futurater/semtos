@@ -206,86 +206,104 @@ const CONFIG = {
 const CORRIDORS = {
   BLR_MG_ROAD: {
     id: 'BLR_MG_ROAD',
-    name: 'Bengaluru - MG Road Corridor',
+    name: 'Bengaluru — MG Road to Bowring Hospital',
     intersections: [
       {
-        id: 'INT_BLR_1',
+        id: 'INT_BLR_MG_2',
         name: 'Brigade Road Junction',
-        coords: [77.6074, 12.9752], // [lng, lat]
-        approachBearing: 275,
-        crossStreetBearing: 185,
+        coords: [77.60662, 12.97522], // [lng, lat]
+        approachBearing: 284,
+        crossStreetBearing: 194,
       },
     ],
     primaryRoute: [
-      [77.6200, 12.9738], // Trinity Circle
-      [77.6160, 12.9744], // 1 MG Lido Mall
-      [77.6110, 12.9748], // Mayo Hall Junction
-      [77.6074, 12.9752], // Brigade Road Junction (Signal)
-      [77.6030, 12.9756], // Anil Kumble Circle
+      [77.61684, 12.97303], // Trinity Metro Station
+      [77.61520, 12.97331],
+      [77.61365, 12.97358], // 1 MG Lido Mall
+      [77.61210, 12.97385],
+      [77.61065, 12.97411], // J1: Mayo Hall Junction
+      [77.60930, 12.97446],
+      [77.60805, 12.97481], // Cauvery Emporium
+      [77.60662, 12.97522], // J2: Brigade Road Junction
+      [77.60520, 12.97561],
+      [77.60365, 12.97605],
+      [77.60180, 12.97657], // J3: Anil Kumble Circle
     ],
     bypassRoute: [
-      [77.6200, 12.9738], // Trinity Circle
-      [77.6160, 12.9744], // 1 MG Lido Mall
-      [77.6115, 12.9722], // Residency Road Bypass (South Parallel)
-      [77.6068, 12.9718], // Richmond Circle Connector
-      [77.6030, 12.9756], // Anil Kumble Circle (Hospital Approach)
+      [77.61684, 12.97303],
+      [77.61560, 12.97490], // Ulsoor Road North Turn
+      [77.61320, 12.97720], // Dickenson Road Corridor
+      [77.60910, 12.97810], // Cubbon Road Junction
+      [77.60510, 12.97865],
+      [77.60240, 12.97895],
+      [77.60180, 12.97657], // Rejoin at Anil Kumble Circle
     ],
-    bypassName: 'Residency Road – St. Marks Road Emergency Bypass',
+    bypassName: 'Ulsoor Rd – Cubbon Road Parallel Green Bypass',
   },
-  SF_MARKET: {
-    id: 'SF_MARKET',
-    name: 'San Francisco - Market St Corridor',
+  BLR_HOSUR_RD: {
+    id: 'BLR_HOSUR_RD',
+    name: "Bengaluru — Silk Board to St. John's Hospital",
     intersections: [
       {
-        id: 'INT_01',
-        name: '5th & Market Junction',
-        coords: [-122.4077, 37.7845],
-        approachBearing: 48,
-        crossStreetBearing: 138,
+        id: 'INT_BLR_HSR_2',
+        name: 'Nexus Checkpost Signal',
+        coords: [77.61735, 12.92635],
+        approachBearing: 342,
+        crossStreetBearing: 72,
       },
     ],
     primaryRoute: [
-      [-122.4168, 37.7782],
-      [-122.4138, 37.7803],
-      [-122.4107, 37.7824],
-      [-122.4077, 37.7845],
-      [-122.4045, 37.7867],
-      [-122.4015, 37.7888],
+      [77.62285, 12.91765], // Silk Board Flyover
+      [77.62195, 12.91915],
+      [77.62095, 12.92075], // J1: Madiwala Traffic Police Junction
+      [77.61975, 12.92265],
+      [77.61845, 12.92465],
+      [77.61735, 12.92635], // J2: Nexus Checkpost Signal
+      [77.61945, 12.92685],
+      [77.62174, 12.92712], // J3: Koramangala Water Tank
+      [77.62040, 12.92960],
+      [77.61914, 12.93199], // St. John's Emergency Trauma Block
     ],
     bypassRoute: [
-      [-122.4168, 37.7782],
-      [-122.4135, 37.7768], // Mission St Parallel Bypass
-      [-122.4060, 37.7820],
-      [-122.4015, 37.7888],
+      [77.62285, 12.91765],
+      [77.62580, 12.91840], // Outer Ring Road
+      [77.62690, 12.92280], // Koramangala 80 Feet Rd
+      [77.62480, 12.92690],
+      [77.62174, 12.92712],
+      [77.61914, 12.93199],
     ],
-    bypassName: 'Mission St – 4th St Parallel Bypass',
+    bypassName: 'Koramangala 80 Feet Rd – Sarjapur Rd Emergency Bypass',
   },
-  NYC_5TH_AVE: {
-    id: 'NYC_5TH_AVE',
-    name: 'New York - 5th Avenue Corridor',
+  BLR_INDIRANAGAR: {
+    id: 'BLR_INDIRANAGAR',
+    name: 'Bengaluru — Indiranagar 100 Ft Rd to Manipal Hospital',
     intersections: [
       {
-        id: 'INT_NYC_1',
-        name: '5th Ave & 47th St Junction',
-        coords: [-73.9782, 40.7574],
-        approachBearing: 29,
-        crossStreetBearing: 119,
+        id: 'INT_BLR_IND_2',
+        name: 'Domlur 14th Cross Signal',
+        coords: [77.64105, 12.96680],
+        approachBearing: 175,
+        crossStreetBearing: 85,
       },
     ],
     primaryRoute: [
-      [-73.9818, 40.7535],
-      [-73.9796, 40.7558],
-      [-73.9782, 40.7574],
-      [-73.9760, 40.7598],
-      [-73.9738, 40.7621],
+      [77.63853, 12.97826], // Indiranagar Metro / CMH Road
+      [77.64075, 12.97810],
+      [77.64085, 12.97460], // J1: 12th Main Signal
+      [77.64095, 12.97080],
+      [77.64105, 12.96680], // J2: Domlur 14th Cross Signal
+      [77.64115, 12.96180], // J3: Domlur Flyover
+      [77.64480, 12.96040],
+      [77.64860, 12.95920], // Manipal Hospital Emergency Bay
     ],
     bypassRoute: [
-      [-73.9818, 40.7535],
-      [-73.9775, 40.7518], // Madison Ave Bypass
-      [-73.9730, 40.7580],
-      [-73.9738, 40.7621],
+      [77.63853, 12.97826],
+      [77.64490, 12.97780],
+      [77.64620, 12.97050],
+      [77.64780, 12.96320],
+      [77.64860, 12.95920],
     ],
-    bypassName: 'Madison Avenue Emergency Green Corridor',
+    bypassName: 'Indiranagar 80 Feet Rd – HAL 2nd Stage Bypass',
   },
 };
 
@@ -509,10 +527,10 @@ const state = {
   ambulance: {
     unitId: 'AMB-108-BLR',
     active: false,
-    lat: 12.9738,
-    lng: 77.6200,
+    lat: 12.97303,
+    lng: 77.61684,
     speedKmh: 0,
-    heading: 275,
+    heading: 284,
     distanceToSignal: 0,
     etaSeconds: 0,
     bleBeaconActive: true,

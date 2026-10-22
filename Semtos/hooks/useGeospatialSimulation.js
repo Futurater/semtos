@@ -1,140 +1,176 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-// ── Real-World Multi-Intersection Corridor & Bypass Presets ──────────────────
+// ── 100% Bengaluru Real-World Road-Snapped Emergency Corridors ───────────────
 export const CORRIDORS = {
   BLR_MG_ROAD: {
     id: 'BLR_MG_ROAD',
-    name: 'Bengaluru - MG Road Corridor',
-    center: [77.6110, 12.9748],
-    zoom: 16.5,
+    name: 'Bengaluru — MG Road to Bowring Hospital',
+    hospitalName: 'Bowring & Lady Curzon Hospital',
+    center: [77.6088, 12.9747],
+    zoom: 16.6,
     pitch: 62,
-    bearing: 275,
+    bearing: 284,
+    // High-density waypoints snapped to Mahatma Gandhi Road centerline
     route: [
-      [77.6200, 12.9738], // Trinity Circle
-      [77.6160, 12.9744], // 1 MG Lido Mall
-      [77.6110, 12.9748], // J1: Mayo Hall Junction
-      [77.6074, 12.9752], // J2: Brigade Road Junction
-      [77.6030, 12.9756], // J3: Anil Kumble Circle
+      [77.61684, 12.97303], // Trinity Metro Station (Start)
+      [77.61520, 12.97331], // Trinity - Lido Approach
+      [77.61365, 12.97358], // 1 MG Lido Mall
+      [77.61210, 12.97385], // Utility Building Approach
+      [77.61065, 12.97411], // J1: Mayo Hall Junction
+      [77.60930, 12.97446], // Garuda / Kamaraj Rd Cross
+      [77.60805, 12.97481], // Cauvery Emporium
+      [77.60662, 12.97522], // J2: Brigade Road Junction
+      [77.60520, 12.97561], // Metro Plaza MG Road
+      [77.60365, 12.97605], // Spencer's / Barton Centre
+      [77.60180, 12.97657], // J3: Anil Kumble Circle (Bowring Turnoff)
     ],
+    // Bypass via Dickenson Road -> Cubbon Road (North Parallel Road in Bengaluru)
     bypassRoute: [
-      [77.6200, 12.9738], // Trinity Circle
-      [77.6160, 12.9744], // 1 MG Lido Mall
-      [77.6115, 12.9722], // Residency Road Bypass (South Parallel)
-      [77.6068, 12.9718], // Richmond Circle Connector
-      [77.6030, 12.9756], // Anil Kumble Circle
+      [77.61684, 12.97303], // Trinity Metro Station
+      [77.61560, 12.97490], // Ulsoor Road North Turn
+      [77.61320, 12.97720], // Dickenson Road Corridor
+      [77.60910, 12.97810], // Kamaraj Road / Cubbon Road Junction
+      [77.60510, 12.97865], // Cubbon Road Westbound
+      [77.60240, 12.97895], // BRV Parade Ground / Minsk Square
+      [77.60180, 12.97657], // Rejoin at Anil Kumble Circle
     ],
-    bypassName: 'Residency Rd – St. Marks Rd Emergency Bypass',
+    bypassName: 'Ulsoor Rd – Cubbon Road Parallel Green Bypass',
     intersections: [
       {
-        id: 'INT_BLR_1',
+        id: 'INT_BLR_MG_1',
+        shortLabel: 'J1',
         name: 'J1: Mayo Hall Junction',
-        coords: [77.6110, 12.9748],
-        crossStreetBearing: 185,
+        coords: [77.61065, 12.97411],
+        crossStreetBearing: 194,
         distanceAlongRoute: 0,
       },
       {
-        id: 'INT_BLR_2',
+        id: 'INT_BLR_MG_2',
+        shortLabel: 'J2',
         name: 'J2: Brigade Road Junction',
-        coords: [77.6074, 12.9752],
-        crossStreetBearing: 185,
+        coords: [77.60662, 12.97522],
+        crossStreetBearing: 194,
         distanceAlongRoute: 0,
       },
       {
-        id: 'INT_BLR_3',
+        id: 'INT_BLR_MG_3',
+        shortLabel: 'J3',
         name: 'J3: Anil Kumble Circle',
-        coords: [77.6030, 12.9756],
-        crossStreetBearing: 185,
+        coords: [77.60180, 12.97657],
+        crossStreetBearing: 194,
         distanceAlongRoute: 0,
       },
     ],
   },
-  SF_MARKET: {
-    id: 'SF_MARKET',
-    name: 'San Francisco - Market St Corridor',
-    center: [-122.4085, 37.7840],
-    zoom: 16.5,
+
+  BLR_HOSUR_RD: {
+    id: 'BLR_HOSUR_RD',
+    name: "Bengaluru — Silk Board to St. John's Hospital",
+    hospitalName: "St. John's Medical College Hospital (Koramangala)",
+    center: [77.6208, 12.9248],
+    zoom: 16.0,
     pitch: 62,
-    bearing: 48,
+    bearing: 342,
+    // Snapped along Hosur Main Road (NH 48) -> Madiwala -> Koramangala Water Tank -> St. John's
     route: [
-      [-122.4168, 37.7782], // 8th & Market
-      [-122.4138, 37.7803], // J1: 7th & Market
-      [-122.4107, 37.7824], // 6th & Market
-      [-122.4077, 37.7845], // J2: 5th & Market
-      [-122.4045, 37.7867], // 4th & Market
-      [-122.4015, 37.7888], // J3: 3rd & Market
+      [77.62285, 12.91765], // Silk Board Flyover Northbound Ramp
+      [77.62195, 12.91915], // Roopena Agrahara Bus Stop
+      [77.62095, 12.92075], // J1: Madiwala Traffic Police Junction
+      [77.61975, 12.92265], // Madiwala Underpass / Ayyappa Temple
+      [77.61845, 12.92465], // Total Mall / Hosur Rd Service Merge
+      [77.61735, 12.92635], // J2: Forum / Nexus Mall Checkpost
+      [77.61945, 12.92685], // Sarjapur Road East Turn
+      [77.62174, 12.92712], // J3: Koramangala Water Tank Junction
+      [77.62040, 12.92960], // St. John's Hospital Main Gate
+      [77.61914, 12.93199], // St. John's Emergency Trauma Block
     ],
     bypassRoute: [
-      [-122.4168, 37.7782],
-      [-122.4135, 37.7768], // Mission St Parallel Bypass
-      [-122.4060, 37.7820],
-      [-122.4015, 37.7888],
+      [77.62285, 12.91765], // Silk Board
+      [77.62580, 12.91840], // Outer Ring Road (Agara Direction)
+      [77.62690, 12.92280], // Koramangala 1st Block 80 Feet Rd
+      [77.62480, 12.92690], // Krupanidhi / Sarjapur Rd Approach
+      [77.62174, 12.92712], // Koramangala Water Tank
+      [77.61914, 12.93199], // St. John's Emergency Block
     ],
-    bypassName: 'Mission St – 4th St Parallel Bypass',
+    bypassName: 'Koramangala 80 Feet Rd – Sarjapur Rd Emergency Bypass',
     intersections: [
       {
-        id: 'INT_SF_1',
-        name: 'J1: 7th & Market Junction',
-        coords: [-122.4138, 37.7803],
-        crossStreetBearing: 138,
+        id: 'INT_BLR_HSR_1',
+        shortLabel: 'J1',
+        name: 'J1: Madiwala Police Junction',
+        coords: [77.62095, 12.92075],
+        crossStreetBearing: 72,
         distanceAlongRoute: 0,
       },
       {
-        id: 'INT_SF_2',
-        name: 'J2: 5th & Market Junction',
-        coords: [-122.4077, 37.7845],
-        crossStreetBearing: 138,
+        id: 'INT_BLR_HSR_2',
+        shortLabel: 'J2',
+        name: 'J2: Nexus Checkpost Signal',
+        coords: [77.61735, 12.92635],
+        crossStreetBearing: 72,
         distanceAlongRoute: 0,
       },
       {
-        id: 'INT_SF_3',
-        name: 'J3: 3rd & Market Junction',
-        coords: [-122.4015, 37.7888],
-        crossStreetBearing: 138,
+        id: 'INT_BLR_HSR_3',
+        shortLabel: 'J3',
+        name: 'J3: Koramangala Water Tank',
+        coords: [77.62174, 12.92712],
+        crossStreetBearing: 72,
         distanceAlongRoute: 0,
       },
     ],
   },
-  NYC_5TH_AVE: {
-    id: 'NYC_5TH_AVE',
-    name: 'New York - 5th Avenue Corridor',
-    center: [-73.9782, 40.7574],
-    zoom: 16.5,
+
+  BLR_INDIRANAGAR: {
+    id: 'BLR_INDIRANAGAR',
+    name: 'Bengaluru — Indiranagar 100 Ft Rd to Manipal Hospital',
+    hospitalName: 'Manipal Hospital (HAL Old Airport Road)',
+    center: [77.6412, 12.9685],
+    zoom: 16.0,
     pitch: 62,
-    bearing: 29,
+    bearing: 175,
+    // Snapped along Indiranagar 100 Feet Road Southbound -> Domlur Flyover -> Old Airport Rd
     route: [
-      [-73.9818, 40.7535], // 42nd & 5th
-      [-73.9796, 40.7558], // J1: 45th & 5th
-      [-73.9782, 40.7574], // J2: 47th & 5th
-      [-73.9760, 40.7598], // J3: 50th & 5th
-      [-73.9738, 40.7621], // 53rd & 5th
+      [77.63853, 12.97826], // Indiranagar Metro / CMH Road Junction
+      [77.64075, 12.97810], // 100 Feet Road & CMH Signal
+      [77.64085, 12.97460], // J1: 12th Main Indiranagar Signal
+      [77.64095, 12.97080], // 80 Feet Road / Sony World Approach
+      [77.64105, 12.96680], // J2: Domlur BDA / 14th Cross Signal
+      [77.64115, 12.96180], // J3: Domlur Flyover & Old Airport Rd
+      [77.64480, 12.96040], // Kodihalli / Leela Palace Signal
+      [77.64860, 12.95920], // Manipal Hospital Emergency Bay
     ],
     bypassRoute: [
-      [-73.9818, 40.7535],
-      [-73.9775, 40.7518], // Madison Ave Bypass
-      [-73.9730, 40.7580],
-      [-73.9738, 40.7621],
+      [77.63853, 12.97826], // Indiranagar Metro
+      [77.64490, 12.97780], // Old Madras Rd / 80 Feet Rd Parallel
+      [77.64620, 12.97050], // New Thippasandra / HAL 2nd Stage 80 Ft Rd
+      [77.64780, 12.96320], // Suranjan Das Road Connector
+      [77.64860, 12.95920], // Manipal Hospital Emergency Bay
     ],
-    bypassName: 'Madison Avenue Emergency Green Corridor',
+    bypassName: 'Indiranagar 80 Feet Rd – HAL 2nd Stage Bypass',
     intersections: [
       {
-        id: 'INT_NYC_1',
-        name: 'J1: 5th Ave & 45th St',
-        coords: [-73.9796, 40.7558],
-        crossStreetBearing: 119,
+        id: 'INT_BLR_IND_1',
+        shortLabel: 'J1',
+        name: 'J1: 12th Main 100 Ft Rd Signal',
+        coords: [77.64085, 12.97460],
+        crossStreetBearing: 85,
         distanceAlongRoute: 0,
       },
       {
-        id: 'INT_NYC_2',
-        name: 'J2: 5th Ave & 47th St',
-        coords: [-73.9782, 40.7574],
-        crossStreetBearing: 119,
+        id: 'INT_BLR_IND_2',
+        shortLabel: 'J2',
+        name: 'J2: Domlur 14th Cross Signal',
+        coords: [77.64105, 12.96680],
+        crossStreetBearing: 85,
         distanceAlongRoute: 0,
       },
       {
-        id: 'INT_NYC_3',
-        name: 'J3: 5th Ave & 50th St',
-        coords: [-73.9760, 40.7598],
-        crossStreetBearing: 119,
+        id: 'INT_BLR_IND_3',
+        shortLabel: 'J3',
+        name: 'J3: Domlur Flyover Junction',
+        coords: [77.64115, 12.96180],
+        crossStreetBearing: 85,
         distanceAlongRoute: 0,
       },
     ],
@@ -164,194 +200,281 @@ function calculateBearing([lon1, lat1], [lon2, lat2]) {
   return (Math.atan2(y, x) * (180 / Math.PI) + 360) % 360;
 }
 
-function offsetCoordinates([lon, lat], bearingDeg, distanceMeters) {
+/**
+ * Displaces a [lon, lat] point laterally perpendicular to `bearingDeg`.
+ * Positive `lateralMeters` shifts left (Indian keep-left shoulder); negative shifts right.
+ */
+function offsetCoordinates([lon, lat], bearingDeg, lateralMeters) {
+  if (!lateralMeters || Math.abs(lateralMeters) < 0.01) return [lon, lat];
   const R = 6371000;
   const toRad = Math.PI / 180;
-  const bearingRad = (bearingDeg + 90) * toRad;
+  // Left shoulder is (bearing - 90) degrees
+  const perpBearingRad = ((bearingDeg - 90 + 360) % 360) * toRad;
   const lat1 = lat * toRad;
   const lon1 = lon * toRad;
+  const angDist = lateralMeters / R;
 
   const lat2 = Math.asin(
-    Math.sin(lat1) * Math.cos(distanceMeters / R) +
-    Math.cos(lat1) * Math.sin(distanceMeters / R) * Math.cos(bearingRad)
+    Math.sin(lat1) * Math.cos(angDist) +
+    Math.cos(lat1) * Math.sin(angDist) * Math.cos(perpBearingRad)
   );
   const lon2 =
     lon1 +
     Math.atan2(
-      Math.sin(bearingRad) * Math.sin(distanceMeters / R) * Math.cos(lat1),
-      Math.cos(distanceMeters / R) - Math.sin(lat1) * Math.sin(lat2)
+      Math.sin(perpBearingRad) * Math.sin(angDist) * Math.cos(lat1),
+      Math.cos(angDist) - Math.sin(lat1) * Math.sin(lat2)
     );
 
   return [lon2 * (180 / Math.PI), lat2 * (180 / Math.PI)];
 }
 
+/**
+ * Interpolates [lon, lat] and forward bearing at `targetDist` meters along a polyline.
+ */
+function samplePointAlongPolyline(routePoints, cumDists, targetDist) {
+  if (!routePoints || routePoints.length === 0) {
+    return { coords: [77.61065, 12.97411], bearing: 284 };
+  }
+  if (routePoints.length === 1 || !cumDists || cumDists.length < 2) {
+    return { coords: routePoints[0], bearing: 284 };
+  }
+  const totalLen = cumDists[cumDists.length - 1] || 1;
+  const clamped = Math.max(0, Math.min(totalLen, targetDist));
+
+  let segIdx = 0;
+  for (let i = 0; i < cumDists.length - 1; i++) {
+    if (clamped >= cumDists[i] && clamped <= cumDists[i + 1]) {
+      segIdx = i;
+      break;
+    }
+  }
+
+  const p1 = routePoints[segIdx];
+  const p2 = routePoints[segIdx + 1] || p1;
+  const segStart = cumDists[segIdx];
+  const segLen = Math.max(0.01, cumDists[segIdx + 1] - segStart);
+  const frac = (clamped - segStart) / segLen;
+
+  const lon = p1[0] + (p2[0] - p1[0]) * frac;
+  const lat = p1[1] + (p2[1] - p1[1]) * frac;
+  const bearing = calculateBearing(p1, p2);
+  return { coords: [lon, lat], bearing };
+}
+
 export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
-  const corridor = CORRIDORS[selectedCorridorKey] || CORRIDORS.BLR_MG_ROAD;
+  const baseCorridor = CORRIDORS[selectedCorridorKey] || CORRIDORS.BLR_MG_ROAD;
+
+  // Store OSRM road-snapped polylines (defaults immediately to our verified high-density road points)
+  const [snappedPrimaryRoute, setSnappedPrimaryRoute] = useState(baseCorridor.route);
+  const [snappedBypassRoute, setSnappedBypassRoute] = useState(baseCorridor.bypassRoute);
 
   const routeDistancesRef = useRef([]);
   const totalRouteMetersRef = useRef(0);
   const deadlockRerouteRef = useRef(false);
+  const activePolylineRef = useRef(baseCorridor.route);
 
-  const initRouteDistances = useCallback(
-    (useBypass = false) => {
-      const activeRoute =
-        useBypass && corridor.bypassRoute ? corridor.bypassRoute : corridor.route;
+  // Build cumulative distance lookup table for any polyline
+  const buildRouteMetrics = useCallback(
+    (polyline) => {
+      const pts = Array.isArray(polyline) && polyline.length >= 2 ? polyline : baseCorridor.route;
+      activePolylineRef.current = pts;
       const dists = [0];
       let sum = 0;
-      for (let i = 0; i < activeRoute.length - 1; i++) {
-        const segLen = haversineDistanceMeters(activeRoute[i], activeRoute[i + 1]);
-        sum += segLen;
+      for (let i = 0; i < pts.length - 1; i++) {
+        sum += haversineDistanceMeters(pts[i], pts[i + 1]);
         dists.push(sum);
       }
       routeDistancesRef.current = dists;
       totalRouteMetersRef.current = sum;
 
-      corridor.intersections.forEach((intNode) => {
-        let closestDist = 0;
+      // Snap each intersection's `distanceAlongRoute` to the closest vertex along the road
+      baseCorridor.intersections.forEach((intNode) => {
+        let closestDist = sum * 0.5;
         let minDist = Infinity;
-        for (let i = 0; i < corridor.route.length; i++) {
-          const d = haversineDistanceMeters(intNode.coords, corridor.route[i]);
+        for (let i = 0; i < pts.length; i++) {
+          const d = haversineDistanceMeters(intNode.coords, pts[i]);
           if (d < minDist) {
             minDist = d;
-            closestDist = dists[Math.min(i, dists.length - 1)] || 0;
+            closestDist = dists[i] || 0;
           }
         }
         intNode.distanceAlongRoute = closestDist;
       });
+
+      return { pts, dists, sum };
     },
-    [corridor]
+    [baseCorridor]
   );
 
-  useEffect(() => {
-    initRouteDistances(deadlockRerouteRef.current);
-  }, [initRouteDistances]);
+  // Create 7 civilian vehicles that actively drive along the road corridor
+  const createRoadAlignedCivilianVehicles = useCallback(
+    (pts, dists, totalLen) => {
+      const fracciones = [0.16, 0.27, 0.39, 0.50, 0.62, 0.74, 0.85];
+      return fracciones.map((pct, idx) => {
+        const distAlong = totalLen * pct;
+        // Slight baseline lane offset so cars drive in a clean left/right lane formation on the road
+        const baseLaneOffset = idx % 2 === 0 ? 1.2 : -1.1;
+        const sampled = samplePointAlongPolyline(pts, dists, distAlong);
+        const roadCoords = offsetCoordinates(sampled.coords, sampled.bearing, baseLaneOffset);
+        return {
+          id: idx + 1,
+          distAlongRoute: distAlong,
+          speedMps: 6.5 + (idx % 3) * 0.8, // ~24-30 km/h normal commuter speed
+          baseLaneOffset,
+          laneOffsetMeters: baseLaneOffset,
+          currentCoords: roadCoords,
+          bearing: sampled.bearing,
+          isYielding: false,
+          isStoppedAtRed: false,
+          type: idx === 2 ? 'SUV' : 'SEDAN',
+        };
+      });
+    },
+    []
+  );
 
-  const [simState, setSimState] = useState({
-    isSimulationRunning: false,
-    isFrozen: false,
-    useRealPhoneGps: false,
-    deadlockRerouteActive: false,
-    bypassName: corridor.bypassName,
-    ambulancePosition: corridor.route[0],
-    ambulanceBearing: 0,
-    ambulanceSpeedKmh: 0,
-    distanceToNextSignal: 0,
-    etaToSignalSeconds: 0,
-    activeJunctionName: corridor.intersections[0]?.name || 'Junction 1',
-    intersectionStates: corridor.intersections.map((n) => ({
-      id: n.id,
-      name: n.name,
-      coords: n.coords,
-      status: 'RED', // 'RED' | 'GREEN_WAVE' | 'CLEARED' | 'GRIDLOCK_BYPASSED'
-    })),
-    bleRadiusMeters: 110,
-    signalPhase: 'NORMAL_CYCLE',
-    nGreen: true,
-    sGreen: true,
-    eGreen: false,
-    wGreen: false,
-    activeAlert: false,
-    v2xConnected: false,
+  const [civilianVehicles, setCivilianVehicles] = useState(() => {
+    const { pts, dists, sum } = buildRouteMetrics(baseCorridor.route);
+    return createRoadAlignedCivilianVehicles(pts, dists, sum);
   });
 
-  const [civilianVehicles, setCivilianVehicles] = useState([]);
-
-  const simRunningRef = useRef(false);
-  const isFrozenRef = useRef(false);
-  const distanceCoveredRef = useRef(0);
-  const speedMpsRef = useRef(15.0); // ~54 km/h
-  const wsRef = useRef(null);
-  const preemptionFiredRef = useRef(false);
-  const clearanceFiredRef = useRef(false);
-
-  const initCivilianVehicles = useCallback(() => {
-    const route = corridor.route;
-    const cars = [];
-    let carId = 1;
-
-    const positionsAlongRoute = [0.22, 0.38, 0.52, 0.68, 0.82];
-    const totalDist = totalRouteMetersRef.current || 1000;
-
-    positionsAlongRoute.forEach((pct) => {
-      const targetDist = totalDist * pct;
-      const dists = routeDistancesRef.current;
-      let segIdx = 0;
-      for (let i = 0; i < dists.length - 1; i++) {
-        if (targetDist >= dists[i] && targetDist <= dists[i + 1]) {
-          segIdx = i;
-          break;
-        }
-      }
-      const p1 = route[segIdx] || route[0];
-      const p2 = route[segIdx + 1] || route[1] || p1;
-      const segStart = dists[segIdx] || 0;
-      const segLen = (dists[segIdx + 1] || 1) - segStart;
-      const frac = segLen > 0 ? (targetDist - segStart) / segLen : 0;
-      const lon = p1[0] + (p2[0] - p1[0]) * frac;
-      const lat = p1[1] + (p2[1] - p1[1]) * frac;
-      const bearing = calculateBearing(p1, p2);
-
-      cars.push({
-        id: carId++,
-        originalCoords: [lon, lat],
-        currentCoords: [lon, lat],
-        bearing,
-        laneOffsetMeters: 0,
-        targetOffsetMeters: 0,
-        isYielding: false,
-        type: 'SEDAN',
-      });
-    });
-
-    setCivilianVehicles(cars);
-  }, [corridor]);
-
-  useEffect(() => {
-    initCivilianVehicles();
-  }, [initCivilianVehicles]);
-
-  // Reset simulation whenever corridor changes
-  useEffect(() => {
-    simRunningRef.current = false;
-    distanceCoveredRef.current = 0;
-    preemptionFiredRef.current = false;
-    clearanceFiredRef.current = false;
-    speedMpsRef.current = 15.0;
-
-    const startPos = corridor.route[0] || [0, 0];
-    const secondPos = corridor.route[1] || startPos;
-    const initialBearing = calculateBearing(startPos, secondPos);
-
-    initRouteDistances(deadlockRerouteRef.current);
-    initCivilianVehicles();
-
-    setSimState((prev) => ({
-      ...prev,
+  const [simState, setSimState] = useState(() => {
+    const startPt = baseCorridor.route[0];
+    const nextPt = baseCorridor.route[1] || startPt;
+    return {
       isSimulationRunning: false,
       isFrozen: false,
-      bypassName: corridor.bypassName,
-      ambulancePosition: startPos,
-      ambulanceBearing: initialBearing,
+      useRealPhoneGps: false,
+      deadlockRerouteActive: false,
+      bypassName: baseCorridor.bypassName,
+      ambulancePosition: startPt,
+      ambulanceBearing: calculateBearing(startPt, nextPt),
       ambulanceSpeedKmh: 0,
-      distanceToNextSignal: 0,
+      distanceToNextSignal: 340,
       etaToSignalSeconds: 0,
-      activeJunctionName: corridor.intersections[0]?.name || 'Junction 1',
-      intersectionStates: corridor.intersections.map((n) => ({
+      activeJunctionName: baseCorridor.intersections[0]?.name || 'J1',
+      intersectionStates: baseCorridor.intersections.map((n) => ({
         id: n.id,
+        shortLabel: n.shortLabel || 'J',
         name: n.name,
         coords: n.coords,
         status: 'RED',
       })),
+      bleRadiusMeters: 110,
       signalPhase: 'NORMAL_CYCLE',
       nGreen: true,
       sGreen: true,
       eGreen: false,
       wGreen: false,
       activeAlert: false,
-    }));
-  }, [corridor, initRouteDistances, initCivilianVehicles]);
+      v2xConnected: false,
+    };
+  });
 
-  // ---- Connect to Authoritative V2X Server (Syncs Phone 1 & YOLOv8 Deadlock) ----
+  const simRunningRef = useRef(false);
+  const isFrozenRef = useRef(false);
+  const distanceCoveredRef = useRef(0);
+  const speedMpsRef = useRef(16.5); // ~60 km/h emergency response speed
+  const wsRef = useRef(null);
+  const preemptionFiredRef = useRef(false);
+  const clearanceFiredRef = useRef(false);
+
+  // ── Fetch Exact OpenStreetMap Road Geometry via OSRM Driving API ───────────
+  useEffect(() => {
+    let cancelled = false;
+    setSnappedPrimaryRoute(baseCorridor.route);
+    setSnappedBypassRoute(baseCorridor.bypassRoute);
+
+    const { pts, dists, sum } = buildRouteMetrics(baseCorridor.route);
+    setCivilianVehicles(createRoadAlignedCivilianVehicles(pts, dists, sum));
+
+    const startPt = pts[0];
+    const secondPt = pts[1] || startPt;
+    simRunningRef.current = false;
+    distanceCoveredRef.current = 0;
+
+    setSimState((prev) => ({
+      ...prev,
+      isSimulationRunning: false,
+      isFrozen: false,
+      bypassName: baseCorridor.bypassName,
+      ambulancePosition: startPt,
+      ambulanceBearing: calculateBearing(startPt, secondPt),
+      ambulanceSpeedKmh: 0,
+      distanceToNextSignal: Math.round(baseCorridor.intersections[0]?.distanceAlongRoute || 350),
+      etaToSignalSeconds: 0,
+      activeJunctionName: baseCorridor.intersections[0]?.name || 'J1',
+      intersectionStates: baseCorridor.intersections.map((n) => ({
+        id: n.id,
+        shortLabel: n.shortLabel || 'J',
+        name: n.name,
+        coords: n.coords,
+        status: 'RED',
+      })),
+      signalPhase: 'NORMAL_CYCLE',
+      activeAlert: false,
+    }));
+
+    // Query OSRM in the browser so the polyline follows every exact curve of Bengaluru's streets
+    async function fetchOsrmRoadGeometry() {
+      try {
+        const keyPoints = [
+          baseCorridor.route[0],
+          ...baseCorridor.intersections.map((i) => i.coords),
+          baseCorridor.route[baseCorridor.route.length - 1],
+        ];
+        // Deduplicate adjacent identical points
+        const uniquePts = keyPoints.filter(
+          (pt, idx, arr) =>
+            idx === 0 || haversineDistanceMeters(pt, arr[idx - 1]) > 15
+        );
+        const coordStr = uniquePts.map((p) => `${p[0]},${p[1]}`).join(';');
+        const res = await fetch(
+          `https://router.project-osrm.org/route/v1/driving/${coordStr}?overview=full&geometries=geojson`
+        );
+        if (res.ok) {
+          const data = await res.json();
+          const osrmCoords = data?.routes?.[0]?.geometry?.coordinates;
+          if (!cancelled && Array.isArray(osrmCoords) && osrmCoords.length >= 4) {
+            setSnappedPrimaryRoute(osrmCoords);
+            if (!deadlockRerouteRef.current) {
+              const metrics = buildRouteMetrics(osrmCoords);
+              setCivilianVehicles(
+                createRoadAlignedCivilianVehicles(metrics.pts, metrics.dists, metrics.sum)
+              );
+            }
+          }
+        }
+
+        // Also snap the Bypass Route via OSRM
+        if (baseCorridor.bypassRoute && baseCorridor.bypassRoute.length >= 2) {
+          const bypassStr = baseCorridor.bypassRoute.map((p) => `${p[0]},${p[1]}`).join(';');
+          const resBypass = await fetch(
+            `https://router.project-osrm.org/route/v1/driving/${bypassStr}?overview=full&geometries=geojson`
+          );
+          if (resBypass.ok) {
+            const bData = await resBypass.json();
+            const bCoords = bData?.routes?.[0]?.geometry?.coordinates;
+            if (!cancelled && Array.isArray(bCoords) && bCoords.length >= 4) {
+              setSnappedBypassRoute(bCoords);
+              if (deadlockRerouteRef.current) {
+                buildRouteMetrics(bCoords);
+              }
+            }
+          }
+        }
+      } catch (_) {
+        // Offline fallback: already initialized with high-density Google-Maps-verified road coordinates
+      }
+    }
+
+    fetchOsrmRoadGeometry();
+    return () => {
+      cancelled = true;
+    };
+  }, [baseCorridor, buildRouteMetrics, createRoadAlignedCivilianVehicles]);
+
+  // ---- Connect to Authoritative V2X Server ----
   useEffect(() => {
     let ws = null;
     let reconnectTimer = null;
@@ -381,7 +504,6 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
           try {
             const data = JSON.parse(event.data);
 
-            // 1. Sync Deadlock Rerouting from YOLOv8 or Server
             if (data.event === 'V2X_DEADLOCK_REROUTE' || data.event === 'YOLO_QUEUE_STATE') {
               const isDeadlock =
                 data.event === 'V2X_DEADLOCK_REROUTE'
@@ -389,8 +511,6 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
                   : Boolean(data.routing?.deadlockRerouteActive);
 
               deadlockRerouteRef.current = isDeadlock;
-              initRouteDistances(isDeadlock);
-
               setSimState((prev) => ({
                 ...prev,
                 deadlockRerouteActive: isDeadlock,
@@ -401,7 +521,6 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
               }));
             }
 
-            // 2. Sync Live Ambulance Position from Phone 1 (/ambulance) — works for BOTH Indoor Replay & Live GPS!
             if (
               (data.event === 'AMBULANCE_TELEMETRY' || data.event === 'GPS_BROADCAST') &&
               typeof data.lat === 'number' &&
@@ -419,7 +538,6 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
               }));
             }
 
-            // 3. Auto-start local map run if Phone 1 triggers SIMULATION_STARTED
             if (data.event === 'SIMULATION_STARTED' && !simRunningRef.current) {
               simRunningRef.current = true;
               distanceCoveredRef.current = 0;
@@ -433,47 +551,53 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
     }
 
     connect();
-
     return () => {
       unmounted = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (ws) ws.close();
     };
-  }, [initRouteDistances]);
+  }, []);
 
   const sendV2X = useCallback((packet) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       try {
         wsRef.current.send(JSON.stringify({ ...packet, timestamp: Date.now() }));
-      } catch (e) {
-        console.warn('[GEOSPATIAL-V2X] Failed to send packet:', e);
-      }
+      } catch (_) {}
     }
   }, []);
 
   const dispatchAmbulance = useCallback(() => {
+    const activePoly = deadlockRerouteRef.current ? snappedBypassRoute : snappedPrimaryRoute;
+    const { pts, dists, sum } = buildRouteMetrics(activePoly);
+
     simRunningRef.current = true;
     distanceCoveredRef.current = 0;
     preemptionFiredRef.current = false;
     clearanceFiredRef.current = false;
-    speedMpsRef.current = 15.0;
+    speedMpsRef.current = 16.5;
 
-    const activeRoute =
-      deadlockRerouteRef.current && corridor.bypassRoute
-        ? corridor.bypassRoute
-        : corridor.route;
+    setCivilianVehicles(createRoadAlignedCivilianVehicles(pts, dists, sum));
 
+    const startSample = samplePointAlongPolyline(pts, dists, 0);
     setSimState((prev) => ({
       ...prev,
       isSimulationRunning: true,
-      ambulancePosition: activeRoute[0],
-      ambulanceSpeedKmh: 54,
+      ambulancePosition: startSample.coords,
+      ambulanceBearing: startSample.bearing,
+      ambulanceSpeedKmh: 58,
       signalPhase: 'NORMAL_CYCLE',
       activeAlert: false,
     }));
 
-    sendV2X({ event: 'SIMULATION_STARTED', corridor: corridor.id });
-  }, [corridor, sendV2X]);
+    sendV2X({ event: 'SIMULATION_STARTED', corridor: baseCorridor.id });
+  }, [
+    snappedBypassRoute,
+    snappedPrimaryRoute,
+    buildRouteMetrics,
+    createRoadAlignedCivilianVehicles,
+    baseCorridor.id,
+    sendV2X,
+  ]);
 
   const toggleFreeze = useCallback(() => {
     isFrozenRef.current = !isFrozenRef.current;
@@ -483,9 +607,7 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
   const toggleRealPhoneGps = useCallback(() => {
     setSimState((prev) => {
       const next = !prev.useRealPhoneGps;
-      if (next) {
-        simRunningRef.current = false;
-      }
+      if (next) simRunningRef.current = false;
       return { ...prev, useRealPhoneGps: next, isSimulationRunning: next };
     });
   }, []);
@@ -504,118 +626,158 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
     return () => window.removeEventListener('keydown', handleKey);
   }, [dispatchAmbulance, toggleFreeze]);
 
-  // ---- Main Geospatial Multi-Intersection Green Wave Simulation Loop ----
+  // ── Continuous Road-Snapped Traffic & Ambulance Simulation Loop ────────────
   useEffect(() => {
     const TICK_MS = 50;
     const interval = setInterval(() => {
-      if (!simRunningRef.current || isFrozenRef.current) return;
+      if (isFrozenRef.current) return;
 
-      const activeRoute =
-        deadlockRerouteRef.current && corridor.bypassRoute
-          ? corridor.bypassRoute
-          : corridor.route;
-      const totalDist = totalRouteMetersRef.current;
-      const dists = routeDistancesRef.current;
-      if (!totalDist || dists.length < 2) return;
-
-      const deltaMeters = speedMpsRef.current * (TICK_MS / 1000);
-      distanceCoveredRef.current += deltaMeters;
-      const curDist = distanceCoveredRef.current;
-
-      if (curDist >= totalDist) {
-        simRunningRef.current = false;
-        setSimState((prev) => ({
-          ...prev,
-          isSimulationRunning: false,
-          ambulancePosition: activeRoute[0],
-          ambulanceSpeedKmh: 0,
-          signalPhase: 'NORMAL_CYCLE',
-          nGreen: true,
-          sGreen: true,
-          eGreen: false,
-          wGreen: false,
-          activeAlert: false,
-          intersectionStates: corridor.intersections.map((n) => ({
-            id: n.id,
-            name: n.name,
-            coords: n.coords,
-            status: 'RED',
-          })),
-        }));
-        initCivilianVehicles();
-        return;
+      const activePoly = deadlockRerouteRef.current ? snappedBypassRoute : snappedPrimaryRoute;
+      if (activePolylineRef.current !== activePoly) {
+        buildRouteMetrics(activePoly);
       }
 
-      let segIdx = 0;
-      for (let i = 0; i < dists.length - 1; i++) {
-        if (curDist >= dists[i] && curDist <= dists[i + 1]) {
-          segIdx = i;
-          break;
+      const pts = activePolylineRef.current;
+      const dists = routeDistancesRef.current;
+      const totalDist = totalRouteMetersRef.current;
+      if (!totalDist || dists.length < 2) return;
+
+      const dt = TICK_MS / 1000;
+
+      // 1. Advance Ambulance if Dispatched
+      let curAmbDist = distanceCoveredRef.current;
+      if (simRunningRef.current) {
+        curAmbDist += speedMpsRef.current * dt;
+        distanceCoveredRef.current = curAmbDist;
+
+        if (curAmbDist >= totalDist) {
+          simRunningRef.current = false;
+          distanceCoveredRef.current = 0;
+          const resetSample = samplePointAlongPolyline(pts, dists, 0);
+          setSimState((prev) => ({
+            ...prev,
+            isSimulationRunning: false,
+            ambulancePosition: resetSample.coords,
+            ambulanceBearing: resetSample.bearing,
+            ambulanceSpeedKmh: 0,
+            signalPhase: 'NORMAL_CYCLE',
+            activeAlert: false,
+            intersectionStates: baseCorridor.intersections.map((n) => ({
+              id: n.id,
+              shortLabel: n.shortLabel || 'J',
+              name: n.name,
+              coords: n.coords,
+              status: 'RED',
+            })),
+          }));
+          return;
         }
       }
 
-      const p1 = activeRoute[segIdx];
-      const p2 = activeRoute[segIdx + 1] || p1;
-      const segStartDist = dists[segIdx];
-      const segLen = dists[segIdx + 1] - segStartDist;
-      const frac = segLen > 0 ? (curDist - segStartDist) / segLen : 0;
+      const ambSample = samplePointAlongPolyline(pts, dists, curAmbDist);
+      const [curLon, curLat] = ambSample.coords;
+      const bearing = ambSample.bearing;
 
-      const curLon = p1[0] + (p2[0] - p1[0]) * frac;
-      const curLat = p1[1] + (p2[1] - p1[1]) * frac;
-      const bearing = calculateBearing(p1, p2);
-
-      // Evaluate Multi-Intersection Green Wave across all 3 corridor junctions
-      let upcomingNode = corridor.intersections[corridor.intersections.length - 1];
+      // 2. Evaluate Multi-Intersection Green Wave Cascade across J1, J2, J3
+      let upcomingNode = baseCorridor.intersections[baseCorridor.intersections.length - 1];
       let upcomingDist = 0;
 
-      const updatedIntStates = corridor.intersections.map((node, idx) => {
+      const updatedIntStates = baseCorridor.intersections.map((node, idx) => {
         const dToNode = haversineDistanceMeters([curLon, curLat], node.coords);
-        const passed = curDist > node.distanceAlongRoute + 25;
+        const passed = simRunningRef.current && curAmbDist > node.distanceAlongRoute + 20;
 
         if (deadlockRerouteRef.current && idx === 1) {
           return {
             id: node.id,
+            shortLabel: node.shortLabel || `J${idx + 1}`,
             name: node.name,
             coords: node.coords,
             status: 'GRIDLOCK_BYPASSED',
           };
         }
-
         if (passed) {
           return {
             id: node.id,
+            shortLabel: node.shortLabel || `J${idx + 1}`,
             name: node.name,
             coords: node.coords,
             status: 'CLEARED',
           };
         }
-
-        if (dToNode <= 380) {
+        if (simRunningRef.current && dToNode <= 400) {
           return {
             id: node.id,
+            shortLabel: node.shortLabel || `J${idx + 1}`,
             name: node.name,
             coords: node.coords,
             status: 'GREEN_WAVE',
           };
         }
-
         return {
           id: node.id,
+          shortLabel: node.shortLabel || `J${idx + 1}`,
           name: node.name,
           coords: node.coords,
           status: 'RED',
         };
       });
 
-      // Find nearest upcoming intersection that hasn't been passed yet
-      for (let i = 0; i < corridor.intersections.length; i++) {
-        const node = corridor.intersections[i];
-        if (curDist <= node.distanceAlongRoute + 20) {
+      for (let i = 0; i < baseCorridor.intersections.length; i++) {
+        const node = baseCorridor.intersections[i];
+        if (curAmbDist <= node.distanceAlongRoute + 15) {
           upcomingNode = node;
-          upcomingDist = Math.max(0, node.distanceAlongRoute - curDist);
+          upcomingDist = Math.max(0, node.distanceAlongRoute - curAmbDist);
           break;
         }
       }
+
+      // 3. Move Civilian Vehicles Smoothly Along the Exact Road Geometry
+      const BLE_ALERT_ZONE = 150;
+      setCivilianVehicles((prevCars) =>
+        prevCars.map((car) => {
+          const distAheadOfAmb = car.distAlongRoute - curAmbDist;
+          const inYieldZone =
+            simRunningRef.current && distAheadOfAmb > -18 && distAheadOfAmb <= BLE_ALERT_ZONE;
+
+          // Check if car is approaching a RED intersection stop bar
+          let stoppedAtRed = false;
+          for (let j = 0; j < baseCorridor.intersections.length; j++) {
+            const jNode = baseCorridor.intersections[j];
+            const jState = updatedIntStates[j]?.status || 'RED';
+            const distToStopBar = jNode.distanceAlongRoute - car.distAlongRoute;
+            if (jState === 'RED' && distToStopBar > 4 && distToStopBar < 26) {
+              stoppedAtRed = true;
+              break;
+            }
+          }
+
+          // Advance car along the road (slow down slightly when yielding to left shoulder)
+          let stepMps = stoppedAtRed ? 0 : inYieldZone ? car.speedMps * 0.45 : car.speedMps;
+          let nextDist = car.distAlongRoute + stepMps * dt;
+          if (nextDist >= totalDist) {
+            nextDist = 20;
+          }
+
+          // When yielding, shift smoothly to left shoulder (+4.2m left of centerline)
+          const targetOffset = inYieldZone ? 4.2 : car.baseLaneOffset;
+          const newOffset = car.laneOffsetMeters + (targetOffset - car.laneOffsetMeters) * 0.18;
+
+          const carSample = samplePointAlongPolyline(pts, dists, nextDist);
+          const displacedCoords = offsetCoordinates(carSample.coords, carSample.bearing, newOffset);
+
+          return {
+            ...car,
+            distAlongRoute: nextDist,
+            laneOffsetMeters: newOffset,
+            currentCoords: displacedCoords,
+            bearing: carSample.bearing,
+            isYielding: inYieldZone,
+            isStoppedAtRed: stoppedAtRed,
+          };
+        })
+      );
+
+      if (!simRunningRef.current) return;
 
       const etaSeconds =
         speedMpsRef.current > 0 ? Math.round(upcomingDist / speedMpsRef.current) : 0;
@@ -626,40 +788,23 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
         preemptionFiredRef.current = true;
         sendV2X({
           event: 'V2X_ALERT_TRIGGER',
+          corridorId: baseCorridor.id,
           intersection: upcomingNode.name,
           distanceMeters: Math.round(upcomingDist),
           etaSeconds,
         });
       }
 
-      if (curDist >= totalDist * 0.88 && !clearanceFiredRef.current) {
+      if (curAmbDist >= totalDist * 0.88 && !clearanceFiredRef.current) {
         clearanceFiredRef.current = true;
         sendV2X({
           event: 'V2X_CLEARANCE_CONFIRMED',
+          corridorId: baseCorridor.id,
           intersection: upcomingNode.name,
         });
       }
 
       const speedKmh = Math.round(speedMpsRef.current * 3.6);
-
-      const BLE_RADIUS = 110;
-      setCivilianVehicles((prevCars) =>
-        prevCars.map((car) => {
-          const dToAmb = haversineDistanceMeters([curLon, curLat], car.originalCoords);
-          const inBleRadius = dToAmb <= BLE_RADIUS && curDist < totalDist * 0.92;
-          const targetOffset = inBleRadius ? 3.5 : 0;
-          const newOffset = car.laneOffsetMeters + (targetOffset - car.laneOffsetMeters) * 0.15;
-          const displacedCoords = offsetCoordinates(car.originalCoords, car.bearing, newOffset);
-
-          return {
-            ...car,
-            laneOffsetMeters: newOffset,
-            targetOffsetMeters: targetOffset,
-            currentCoords: displacedCoords,
-            isYielding: inBleRadius,
-          };
-        })
-      );
 
       setSimState((prev) => ({
         ...prev,
@@ -680,6 +825,7 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
 
       sendV2X({
         event: 'AMBULANCE_TELEMETRY',
+        corridorId: baseCorridor.id,
         lat: curLat,
         lng: curLon,
         speedKmh,
@@ -693,10 +839,23 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
     }, TICK_MS);
 
     return () => clearInterval(interval);
-  }, [corridor, sendV2X, initCivilianVehicles]);
+  }, [
+    baseCorridor,
+    snappedPrimaryRoute,
+    snappedBypassRoute,
+    buildRouteMetrics,
+    sendV2X,
+  ]);
+
+  // Expose corridor with live OSRM-snapped polylines so MapboxSimulation draws exact road curves
+  const enrichedCorridor = {
+    ...baseCorridor,
+    route: snappedPrimaryRoute,
+    bypassRoute: snappedBypassRoute,
+  };
 
   return {
-    corridor,
+    corridor: enrichedCorridor,
     simState,
     civilianVehicles,
     dispatchAmbulance,

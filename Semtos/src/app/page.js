@@ -3,21 +3,8 @@
 /**
  * SEMTOS — Smart Emergency Management and Traffic Orchestration System
  * ============================================================================
- * File: Semtos/src/app/page.js (Milestone 4 — Unified 3D Digital Twin &
+ * File: Semtos/src/app/page.js (Unified Bengaluru 3D Digital Twin &
  *       V2X Command Center Dashboard)
- * Route: http://<LAN_IP>:4000/
- *
- * Capabilities Integrated:
- *  1. All 3 Simulation Cases Unlocked on Launch Screen:
- *     - CASE 01: Ambulance Priority Preemption (3D Map & Twin)
- *     - CASE 02: Edge-AI Adaptive Queue Timing (YOLOv8 + OpenCV Live Scaling)
- *     - CASE 03: Dynamic Deadlock Rerouting & Multi-Junction Green Corridor
- *  2. Unified Bidirectional V2X Control:
- *     - Live synchronization with `/ambulance` (Phone 1), `/driver` (Phone 2),
- *       `v2x-server.js` (Port 4081), and `yolo_queue_analyzer.py`.
- *     - Real-time Edge-AI YOLOv8 Queue & Dynamic Green-Hold Panel (`T_hold` formula).
- *     - Hybrid Cloud Online (5G/WebSocket) vs. Offline ESP32 BLE Fallback Toggle.
- *     - Expandable Live V2X & Security Audit Trail Drawer + Preemption Banner.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -26,7 +13,6 @@ import { useTrafficSignal } from '../../hooks/useTrafficSignal';
 import { useGeospatialSimulation, CORRIDORS } from '../../hooks/useGeospatialSimulation';
 import { Canvas3D } from '../../components/Canvas3D';
 import { MapboxSimulation } from '../../components/MapboxSimulation';
-import { PreemptionAlertBanner } from '../../components/PreemptionAlertBanner';
 
 function SignalHUD({
   phase,
@@ -38,14 +24,14 @@ function SignalHUD({
   esp32Signal,
 }) {
   const phaseLabel = {
-    ALL_RED:      { text: 'ALL APPROACHES - GRIDLOCK',      color: '#ef4444', sub: 'Press ENTER or dispatch from /ambulance' },
-    W_GREEN:      { text: 'EMERGENCY - WEST CORRIDOR OPEN', color: '#22c55e', sub: 'Ambulance en route — N/S/W held RED' },
-    E_RESUME:     { text: 'CORRIDOR CLEARED - EAST RESUME', color: '#10b981', sub: 'Yielded vehicles merging back' },
-    N_RELEASE:    { text: 'NORTH RELEASED',                 color: '#22c55e', sub: 'Sequential queue discharge active' },
-    S_RELEASE:    { text: 'SOUTH RELEASED',                 color: '#22c55e', sub: 'Sequential queue discharge active' },
-    W_RELEASE:    { text: 'WEST RELEASED',                  color: '#22c55e', sub: 'Sequential queue discharge active' },
-    E_RELEASE:    { text: 'EAST RELEASED',                  color: '#22c55e', sub: 'Resuming normal cycle' },
-    NORMAL_CYCLE: { text: 'ADAPTIVE NORMAL CYCLE',          color: '#38bdf8', sub: 'YOLOv8 queue-scaled rotation active' },
+    ALL_RED:      { text: 'ALL APPROACHES - STANDBY',       color: '#ef4444', sub: 'Press ENTER or dispatch from /ambulance' },
+    W_GREEN:      { text: 'EMERGENCY - MG RD CORRIDOR OPEN', color: '#22c55e', sub: 'Ambulance en route — Cross-streets held RED' },
+    E_RESUME:     { text: 'CORRIDOR CLEARED - RESUMING',    color: '#10b981', sub: 'Yielded vehicles merging back into lane' },
+    N_RELEASE:    { text: 'NORTH ARM RELEASED',             color: '#22c55e', sub: 'Sequential queue discharge active' },
+    S_RELEASE:    { text: 'SOUTH ARM RELEASED',             color: '#22c55e', sub: 'Sequential queue discharge active' },
+    W_RELEASE:    { text: 'WEST ARM RELEASED',              color: '#22c55e', sub: 'Sequential queue discharge active' },
+    E_RELEASE:    { text: 'EAST ARM RELEASED',              color: '#22c55e', sub: 'Resuming adaptive rotation' },
+    NORMAL_CYCLE: { text: 'ADAPTIVE BTP NORMAL CYCLE',      color: '#38bdf8', sub: 'YOLOv8 queue-scaled rotation active' },
   };
   const p = phaseLabel[phase] || { text: phase, color: '#fff', sub: '' };
   const arms = [
@@ -62,17 +48,20 @@ function SignalHUD({
         top: 16,
         left: 16,
         zIndex: 25,
-        background: 'rgba(2,6,23,0.92)',
+        background: 'rgba(2, 6, 23, 0.90)',
+        backdropFilter: 'blur(12px)',
         border: `1.5px solid ${p.color}`,
-        borderRadius: 12,
+        borderRadius: 14,
         padding: '14px 18px',
         fontFamily: 'monospace',
-        minWidth: 265,
-        boxShadow: `0 0 22px ${p.color}44`,
+        width: 280,
+        boxShadow: `0 12px 32px rgba(0,0,0,0.75), 0 0 20px ${p.color}33`,
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-        <span style={{ fontSize: 10, color: '#94a3b8', letterSpacing: 1.5 }}>3D INTERSECTION SIGNAL</span>
+        <span style={{ fontSize: 10, color: '#94a3b8', letterSpacing: 1.4, fontWeight: 700 }}>
+          BTP 3D SIGNAL CONTROLLER
+        </span>
         <span
           style={{
             fontSize: 9,
@@ -80,16 +69,27 @@ function SignalHUD({
             borderRadius: 4,
             background: networkMode === 'BLE_FALLBACK' ? 'rgba(245,158,11,0.2)' : 'rgba(16,185,129,0.2)',
             color: networkMode === 'BLE_FALLBACK' ? '#fbbf24' : '#34d399',
-            fontWeight: 700,
+            fontWeight: 800,
           }}
         >
           {networkMode === 'BLE_FALLBACK' ? '📡 BLE OVERRIDE' : '☁️ V2X CLOUD'}
         </span>
       </div>
-      <div style={{ fontSize: 13, fontWeight: 800, color: p.color, marginBottom: 2 }}>{p.text}</div>
-      <div style={{ fontSize: 10, color: '#64748b', marginBottom: 10 }}>{p.sub}</div>
+      <div style={{ fontSize: 12.5, fontWeight: 900, color: p.color, marginBottom: 2 }}>{p.text}</div>
+      <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 10 }}>{p.sub}</div>
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, background: 'rgba(15,23,42,0.8)', padding: '6px 10px', borderRadius: 8 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 10,
+          background: 'rgba(15, 23, 42, 0.85)',
+          padding: '7px 10px',
+          borderRadius: 8,
+          border: '1px solid #1e293b',
+        }}
+      >
         <div>
           <div style={{ fontSize: 9, color: '#64748b' }}>PHASE TIMER</div>
           <div style={{ fontSize: 20, fontWeight: 900, color: p.color }}>{timeRemaining}s</div>
@@ -115,9 +115,26 @@ function SignalHUD({
         })}
       </div>
 
-      <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid #1e293b', display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#94a3b8' }}>
-        <span>ESP32 GPIO LED: <strong style={{ color: esp32Signal?.ledState === 'GREEN' ? '#22c55e' : '#ef4444' }}>{esp32Signal?.ledState || 'RED'}</strong></span>
-        <span>BUZZER: <strong>{esp32Signal?.buzzerActive ? 'ACTIVE 🔔' : 'IDLE'}</strong></span>
+      <div
+        style={{
+          marginTop: 10,
+          paddingTop: 8,
+          borderTop: '1px solid #1e293b',
+          display: 'flex',
+          justifyContent: 'space-between',
+          fontSize: 10,
+          color: '#94a3b8',
+        }}
+      >
+        <span>
+          ESP32 LED:{' '}
+          <strong style={{ color: esp32Signal?.ledState === 'GREEN' ? '#4ade80' : '#f87171' }}>
+            {esp32Signal?.ledState || 'RED'}
+          </strong>
+        </span>
+        <span>
+          BUZZER: <strong>{esp32Signal?.buzzerActive ? 'ACTIVE 🔔' : 'IDLE'}</strong>
+        </span>
       </div>
     </div>
   );
@@ -163,7 +180,6 @@ export default function Dashboard() {
     timeRemaining,
   } = useTrafficSignal();
 
-  // Geospatial Map Simulation hook
   const {
     corridor,
     simState: geoSimState,
@@ -173,7 +189,6 @@ export default function Dashboard() {
     toggleRealPhoneGps: toggleGeoPhoneGps,
   } = useGeospatialSimulation(selectedCorridorKey);
 
-  // Sync callbacks between 3D stream and Signal controller
   useEffect(() => {
     registerCallbacks(onAmbulanceOnAvenue, onAmbulanceCleared, onNormalCycle);
     if (registerVehiclesRef) {
@@ -181,14 +196,12 @@ export default function Dashboard() {
     }
   }, [registerCallbacks, registerVehiclesRef, onAmbulanceOnAvenue, onAmbulanceCleared, onNormalCycle]);
 
-  // Dynamically feed YOLOv8 recommended hold duration into the traffic signal state machine
   useEffect(() => {
     if (yoloQueue?.recommendedHoldSeconds) {
       setAdaptiveGreenHoldSeconds(yoloQueue.recommendedHoldSeconds);
     }
   }, [yoloQueue?.recommendedHoldSeconds, setAdaptiveGreenHoldSeconds]);
 
-  // Unified Dispatch Handler (triggers both 3D Geospatial Map + 3D Intersection Twin + V2X Phone Alerts)
   const handleUnifiedDispatch = () => {
     dispatchGeoAmbulance();
     startTwinDispatch(true);
@@ -198,10 +211,10 @@ export default function Dashboard() {
     {
       id: 1,
       label: 'CASE 01',
-      title: 'Ambulance Priority Preemption (3D Map & Twin)',
+      title: 'Bengaluru Green Corridor Preemption (3D Map & Twin)',
       description:
-        'End-to-end V2X emergency preemption with Haversine ETA tracking, directional dot-product civilian alerts, and BLE offline beacon fallback.',
-      tags: ['Haversine Spatial Engine', 'Dot-Product Filter', 'BLE Fallback', '3D Digital Twin'],
+        'OSRM road-snapped Bengaluru corridors (MG Road, Hosur Road, Indiranagar) with Haversine ETA tracking, directional vector alerts, and BLE failover.',
+      tags: ['Bengaluru 3D Map', 'Road-Snapped OSRM', 'Dot-Product Filter', '3D Digital Twin'],
       color: '#22c55e',
       available: true,
       defaultView: 'SPLIT',
@@ -209,10 +222,10 @@ export default function Dashboard() {
     {
       id: 2,
       label: 'CASE 02',
-      title: 'Edge-AI Adaptive Signal Timing (YOLOv8)',
+      title: 'Edge-AI Adaptive Queue Timing (YOLOv8)',
       description:
         'Real-time computer vision queue analytics (YOLOv8 + OpenCV) that counts queued vehicles in the target lane and scales green-hold duration dynamically.',
-      tags: ['YOLOv8 + OpenCV', 'Queue Discharge Model', 'Dynamic Green Hold', 'Live Telemetry'],
+      tags: ['YOLOv8 + OpenCV', 'Queue Discharge Model', 'Dynamic Green Hold', 'BTP AI CCTV'],
       color: '#38bdf8',
       available: true,
       defaultView: 'TWIN',
@@ -220,10 +233,10 @@ export default function Dashboard() {
     {
       id: 3,
       label: 'CASE 03',
-      title: 'Dynamic Deadlock Rerouting & Green Wave',
+      title: 'Multi-Junction Green Wave & Deadlock Bypass',
       description:
-        'Automated gridlock detection (>= 12 queued vehicles) that triggers dynamic corridor bypass rerouting and multi-junction green wave orchestration.',
-      tags: ['Deadlock Detection', 'Bypass Rerouting', 'Multi-Junction Wave', 'V2I Security'],
+        'Automated gridlock detection (>= 12 queued vehicles) that triggers dynamic Bengaluru parallel-road bypass rerouting and 3-junction Green Wave cascade.',
+      tags: ['Deadlock Detection', 'Cubbon Rd Bypass', 'J1 → J2 → J3 Wave', 'V2I Security'],
       color: '#a78bfa',
       available: true,
       defaultView: 'MAP',
@@ -244,6 +257,8 @@ export default function Dashboard() {
     }
   };
 
+  const anyPreemptionActive = isPreempted || geoSimState.signalPhase === 'W_GREEN';
+
   if (!started) {
     return (
       <div
@@ -259,8 +274,8 @@ export default function Dashboard() {
         }}
       >
         <div style={{ textAlign: 'center', marginBottom: 40 }}>
-          <div style={{ fontSize: 11, letterSpacing: 6, color: '#38bdf8', marginBottom: 8 }}>
-            KSCST 50TH SPP • MINIMAL-HARDWARE SOFTWARE-FIRST PROTOTYPE
+          <div style={{ fontSize: 11, letterSpacing: 5, color: '#38bdf8', marginBottom: 8, fontWeight: 700 }}>
+            BENGALURU SMART CITY V2X • KSCST 50TH SPP PROTOTYPE
           </div>
           <h1
             style={{
@@ -274,11 +289,10 @@ export default function Dashboard() {
           >
             SEMTOS CMD
           </h1>
-          <p style={{ color: '#94a3b8', fontSize: 13, marginTop: 10, maxWidth: 620, lineHeight: 1.7 }}>
-            Smart Emergency Management and Traffic Orchestration System — Select an orchestration scenario or launch the mobile V2X transceivers below.
+          <p style={{ color: '#94a3b8', fontSize: 13, marginTop: 10, maxWidth: 640, lineHeight: 1.7 }}>
+            Smart Emergency Management and Traffic Orchestration System — Road-Snapped Bengaluru Emergency Green Corridors (MG Road, Silk Board–Hosur Rd, Indiranagar 100 Ft Rd).
           </p>
 
-          {/* Quick Links to Phone 1 (/ambulance) and Phone 2 (/driver) */}
           <div style={{ display: 'flex', gap: 14, justifyContent: 'center', marginTop: 18, flexWrap: 'wrap' }}>
             <a
               href="/ambulance"
@@ -403,75 +417,142 @@ export default function Dashboard() {
   }
 
   return (
-    <main className="relative w-screen h-screen overflow-hidden bg-slate-950 text-slate-200 font-mono flex flex-col">
-      {/* High-Priority Preemption Screen Flash Banner when Preempted */}
-      <PreemptionAlertBanner
-        isPreempted={isPreempted || geoSimState.signalPhase === 'W_GREEN'}
-        flushDuration={yoloQueue?.recommendedHoldSeconds || 23}
-      />
-
-      {/* ── Top Header Navigation Bar ── */}
-      <header className="h-14 w-full flex-none z-30 flex items-center justify-between px-4 bg-slate-950/95 backdrop-blur-md border-b border-slate-800 pointer-events-auto">
-        <div className="flex items-center gap-3">
+    <main
+      style={{
+        position: 'relative',
+        width: '100vw',
+        height: '100vh',
+        overflow: 'hidden',
+        background: '#020617',
+        color: '#e2e8f0',
+        fontFamily: 'monospace',
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
+      {/* ── Top Header Navigation Bar (Fixed 54px height, No Black Void Above) ── */}
+      <header
+        style={{
+          height: 54,
+          width: '100%',
+          flex: 'none',
+          zIndex: 35,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '0 16px',
+          background: 'rgba(2, 6, 23, 0.96)',
+          backdropFilter: 'blur(12px)',
+          borderBottom: '1px solid #1e293b',
+          boxSizing: 'border-box',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <button
             onClick={() => setStarted(false)}
-            className="text-xs text-slate-400 hover:text-white px-2.5 py-1 rounded bg-slate-900 border border-slate-700 transition"
+            style={{
+              fontSize: 11,
+              color: '#cbd5e1',
+              padding: '5px 10px',
+              borderRadius: 8,
+              background: '#0f172a',
+              border: '1px solid #334155',
+              cursor: 'pointer',
+              fontFamily: 'monospace',
+              fontWeight: 700,
+            }}
           >
             ← SCENARIOS
           </button>
-          <div className="flex items-center gap-2">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span
-              className={`w-2.5 h-2.5 rounded-full ${
-                v2xConnected ? 'bg-emerald-400 shadow-[0_0_8px_#22c55e]' : 'bg-amber-400'
-              }`}
+              style={{
+                width: 9,
+                height: 9,
+                borderRadius: '50%',
+                background: v2xConnected ? '#4ade80' : '#fbbf24',
+                boxShadow: v2xConnected ? '0 0 8px #22c55e' : 'none',
+              }}
             />
-            <span className="font-bold text-white text-sm tracking-wider">SEMTOS CMD</span>
-            <span className="text-[10px] text-emerald-400 px-2 py-0.5 rounded bg-emerald-950/60 border border-emerald-500/30">
+            <span style={{ fontWeight: 900, color: '#ffffff', fontSize: 13, letterSpacing: 1.2 }}>
+              SEMTOS BENGALURU
+            </span>
+            <span
+              style={{
+                fontSize: 10,
+                color: '#4ade80',
+                padding: '2px 7px',
+                borderRadius: 6,
+                background: 'rgba(16, 185, 129, 0.15)',
+                border: '1px solid rgba(34, 197, 94, 0.35)',
+                fontWeight: 800,
+              }}
+            >
               CASE 0{activeCaseId}
             </span>
           </div>
         </div>
 
         {/* View Mode Switcher */}
-        <div className="flex bg-slate-900 border border-slate-800 rounded-xl p-1 text-xs">
-          <button
-            onClick={() => setViewMode('MAP')}
-            className={`px-3 py-1 rounded-lg font-bold transition flex items-center gap-1.5 ${
-              viewMode === 'MAP'
-                ? 'bg-emerald-500 text-slate-950 shadow-[0_0_12px_rgba(34,197,94,0.4)]'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <span>🗺️</span> 3D MAP
-          </button>
-          <button
-            onClick={() => setViewMode('TWIN')}
-            className={`px-3 py-1 rounded-lg font-bold transition flex items-center gap-1.5 ${
-              viewMode === 'TWIN'
-                ? 'bg-emerald-500 text-slate-950 shadow-[0_0_12px_rgba(34,197,94,0.4)]'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <span>🏙️</span> 3D TWIN
-          </button>
-          <button
-            onClick={() => setViewMode('SPLIT')}
-            className={`px-3 py-1 rounded-lg font-bold transition flex items-center gap-1.5 ${
-              viewMode === 'SPLIT'
-                ? 'bg-emerald-500 text-slate-950 shadow-[0_0_12px_rgba(34,197,94,0.4)]'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <span>⚡</span> SPLIT VIEW
-          </button>
+        <div
+          style={{
+            display: 'flex',
+            background: '#0f172a',
+            border: '1px solid #1e293b',
+            borderRadius: 12,
+            padding: 3,
+            gap: 4,
+          }}
+        >
+          {[
+            { id: 'MAP', icon: '🗺️', label: '3D MAP' },
+            { id: 'TWIN', icon: '🏙️', label: '3D TWIN' },
+            { id: 'SPLIT', icon: '⚡', label: 'SPLIT VIEW' },
+          ].map((tab) => {
+            const active = viewMode === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setViewMode(tab.id)}
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: 8,
+                  fontSize: 11,
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  fontFamily: 'monospace',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  background: active ? '#22c55e' : 'transparent',
+                  color: active ? '#020617' : '#94a3b8',
+                  border: 'none',
+                  boxShadow: active ? '0 0 14px rgba(34,197,94,0.4)' : 'none',
+                }}
+              >
+                <span>{tab.icon}</span>
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
         </div>
 
-        {/* Corridor Selector + Network Mode + Mobile App Links */}
-        <div className="flex items-center gap-2">
+        {/* Bengaluru Corridor Selector + Network Mode + Mobile App Links */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <select
             value={selectedCorridorKey}
             onChange={(e) => setSelectedCorridorKey(e.target.value)}
-            className="bg-slate-900 border border-slate-700 text-xs text-white rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-emerald-500 font-mono"
+            style={{
+              background: '#0f172a',
+              border: '1px solid #334155',
+              fontSize: 11,
+              color: '#ffffff',
+              borderRadius: 8,
+              padding: '6px 10px',
+              fontFamily: 'monospace',
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
           >
             {Object.keys(CORRIDORS).map((key) => (
               <option key={key} value={key}>
@@ -482,12 +563,17 @@ export default function Dashboard() {
 
           <button
             onClick={toggleNetworkMode}
-            className={`text-xs px-2.5 py-1.5 rounded-lg font-bold border transition ${
-              networkMode === 'BLE_FALLBACK'
-                ? 'bg-amber-500 text-slate-950 border-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.4)]'
-                : 'bg-slate-900 text-emerald-400 border-emerald-500/40 hover:bg-slate-800'
-            }`}
-            title="Toggle Cloud Online vs Offline ESP32 BLE Beacon Fallback"
+            style={{
+              fontSize: 11,
+              padding: '6px 10px',
+              borderRadius: 8,
+              fontWeight: 800,
+              fontFamily: 'monospace',
+              cursor: 'pointer',
+              background: networkMode === 'BLE_FALLBACK' ? '#f59e0b' : '#0f172a',
+              color: networkMode === 'BLE_FALLBACK' ? '#020617' : '#4ade80',
+              border: networkMode === 'BLE_FALLBACK' ? '1px solid #fcd34d' : '1px solid rgba(34,197,94,0.4)',
+            }}
           >
             {networkMode === 'BLE_FALLBACK' ? '📡 BLE FALLBACK' : '☁️ 5G CLOUD'}
           </button>
@@ -496,57 +582,98 @@ export default function Dashboard() {
             href="/ambulance"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-xs bg-emerald-950/50 hover:bg-emerald-900/70 text-emerald-300 border border-emerald-500/40 px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1 transition"
+            style={{
+              fontSize: 11,
+              background: 'rgba(6, 78, 59, 0.55)',
+              color: '#6ee7b7',
+              border: '1px solid rgba(52, 211, 153, 0.4)',
+              padding: '6px 10px',
+              borderRadius: 8,
+              fontWeight: 800,
+              textDecoration: 'none',
+            }}
           >
-            <span>🚑</span>
-            <span className="hidden lg:inline">AMBULANCE TX</span>
+            🚑 AMB TX
           </a>
 
           <a
             href="/driver"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-xs bg-rose-950/50 hover:bg-rose-900/70 text-rose-300 border border-rose-500/40 px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1 transition"
+            style={{
+              fontSize: 11,
+              background: 'rgba(136, 19, 55, 0.55)',
+              color: '#fda4af',
+              border: '1px solid rgba(251, 113, 133, 0.4)',
+              padding: '6px 10px',
+              borderRadius: 8,
+              fontWeight: 800,
+              textDecoration: 'none',
+            }}
           >
-            <span>📱</span>
-            <span className="hidden lg:inline">DRIVER HUD</span>
+            📱 DRIVER HUD
           </a>
 
           <button
             onClick={() => setShowAuditDrawer((prev) => !prev)}
-            className={`text-xs px-2.5 py-1.5 rounded-lg font-bold border transition ${
-              showAuditDrawer
-                ? 'bg-sky-500/20 text-sky-300 border-sky-500/50'
-                : 'bg-slate-900 text-slate-400 border-slate-700'
-            }`}
+            style={{
+              fontSize: 11,
+              padding: '6px 10px',
+              borderRadius: 8,
+              fontWeight: 800,
+              fontFamily: 'monospace',
+              cursor: 'pointer',
+              background: showAuditDrawer ? 'rgba(56, 189, 248, 0.2)' : '#0f172a',
+              color: showAuditDrawer ? '#38bdf8' : '#94a3b8',
+              border: showAuditDrawer ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid #334155',
+            }}
           >
             📋 LOGS
           </button>
         </div>
       </header>
 
-      {/* ── Deadlock Rerouting Alert Bar (Active when YOLOv8 queue >= 12 cars) ── */}
-      {routing?.deadlockRerouteActive && (
-        <div className="w-full bg-amber-500/95 text-slate-950 px-5 py-1.5 text-xs font-black flex items-center justify-between z-30 shadow-lg">
-          <div className="flex items-center gap-2">
-            <span>⚠️ JUNCTION GRIDLOCK DETECTED ({yoloQueue?.queueCount} QUEUED VEHICLES)</span>
-            <span>•</span>
-            <span>DYNAMIC REROUTE ACTIVE VIA: {routing.bypassName}</span>
-          </div>
-          <button
-            onClick={() => updateYoloQueue(4, 'OPERATOR_CLEAR_GRIDLOCK')}
-            className="px-2.5 py-0.5 rounded bg-slate-950 text-amber-300 text-[10px] font-bold"
-          >
-            CLEAR GRIDLOCK (4 CARS)
-          </button>
+      {/* ── Sleek Floating Preemption Alert Pill (No Black Void Bar!) ── */}
+      {anyPreemptionActive && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 64,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 40,
+            background: 'rgba(6, 78, 59, 0.92)',
+            border: '1.5px solid #4ade80',
+            backdropFilter: 'blur(10px)',
+            borderRadius: 999,
+            padding: '6px 18px',
+            boxShadow: '0 8px 28px rgba(34, 197, 94, 0.45)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            pointerEvents: 'none',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <span style={{ fontSize: 13 }}>🚨</span>
+          <span style={{ fontSize: 11, fontWeight: 900, color: '#ffffff', letterSpacing: 1.2 }}>
+            GREEN CORRIDOR PREEMPTED — BENGALURU V2X ACTIVE • HOLD: {yoloQueue?.recommendedHoldSeconds || 23}s
+          </span>
         </div>
       )}
 
       {/* ── Main Viewports Container ── */}
-      <div className="flex-1 w-full relative flex overflow-hidden">
-        {/* 1. 3D Geospatial Map View */}
+      <div style={{ flex: 1, width: '100%', position: 'relative', display: 'flex', overflow: 'hidden' }}>
+        {/* 1. 3D Bengaluru Geospatial Map View */}
         {(viewMode === 'MAP' || viewMode === 'SPLIT') && (
-          <div className={`${viewMode === 'SPLIT' ? 'w-1/2 border-r border-slate-800' : 'w-full'} h-full relative`}>
+          <div
+            style={{
+              width: viewMode === 'SPLIT' ? '50%' : '100%',
+              height: '100%',
+              position: 'relative',
+              borderRight: viewMode === 'SPLIT' ? '1px solid #1e293b' : 'none',
+            }}
+          >
             <MapboxSimulation
               corridor={corridor}
               simState={geoSimState}
@@ -560,8 +687,14 @@ export default function Dashboard() {
 
         {/* 2. 3D Three.js Intersection Twin View */}
         {(viewMode === 'TWIN' || viewMode === 'SPLIT') && (
-          <div className={`${viewMode === 'SPLIT' ? 'w-1/2' : 'w-full'} h-full relative`}>
-            <div className="absolute inset-0 z-0">
+          <div
+            style={{
+              width: viewMode === 'SPLIT' ? '50%' : '100%',
+              height: '100%',
+              position: 'relative',
+            }}
+          >
+            <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
               <Canvas3D
                 vehiclesRef={vehiclesRef}
                 ambulancePosition={ambulancePosition}
@@ -588,42 +721,70 @@ export default function Dashboard() {
 
         {/* ── Right-Side Floating Edge-AI YOLOv8 Queue & V2X Audit Drawer ── */}
         {showAuditDrawer && (
-          <aside className="absolute top-4 right-4 z-30 w-80 bg-slate-950/92 border border-slate-800 backdrop-blur-md rounded-2xl p-3.5 shadow-2xl flex flex-col gap-3 pointer-events-auto max-h-[calc(100%-2rem)]">
+          <aside
+            style={{
+              position: 'absolute',
+              top: 16,
+              right: 16,
+              zIndex: 30,
+              width: 315,
+              maxHeight: 'calc(100% - 32px)',
+              background: 'rgba(2, 6, 23, 0.90)',
+              border: '1px solid #1e293b',
+              backdropFilter: 'blur(12px)',
+              borderRadius: 16,
+              padding: 14,
+              boxShadow: '0 12px 32px rgba(0, 0, 0, 0.8)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+              pointerEvents: 'auto',
+            }}
+          >
             {/* YOLOv8 Queue Analytics & Hold Scaling Card */}
-            <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[10px] font-bold text-sky-400 tracking-wider uppercase">
-                  🎥 EDGE-AI YOLOv8 QUEUE ANALYTICS
+            <div
+              style={{
+                background: 'rgba(15, 23, 42, 0.9)',
+                border: '1px solid #1e293b',
+                borderRadius: 12,
+                padding: 12,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ fontSize: 10, fontWeight: 800, color: '#38bdf8', letterSpacing: 1 }}>
+                  🎥 EDGE-AI YOLOv8 QUEUE
                 </span>
                 <span
-                  className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
-                    yoloQueue?.deadlockDetected
-                      ? 'bg-red-950 text-red-400 border border-red-500/40'
-                      : 'bg-emerald-950 text-emerald-400 border border-emerald-500/30'
-                  }`}
+                  style={{
+                    fontSize: 9,
+                    padding: '2px 6px',
+                    borderRadius: 4,
+                    fontWeight: 800,
+                    background: yoloQueue?.deadlockDetected ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.2)',
+                    color: yoloQueue?.deadlockDetected ? '#f87171' : '#34d399',
+                  }}
                 >
                   {yoloQueue?.queueDensity || 'MODERATE'}
                 </span>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 my-2">
-                <div className="bg-slate-950 p-2 rounded-lg border border-slate-800">
-                  <div className="text-[9px] text-slate-500">QUEUED CARS</div>
-                  <div className="text-lg font-black text-white">{yoloQueue?.queueCount ?? 4}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                <div style={{ background: '#020617', padding: 8, borderRadius: 8, border: '1px solid #1e293b' }}>
+                  <div style={{ fontSize: 9, color: '#64748b' }}>QUEUED CARS</div>
+                  <div style={{ fontSize: 18, fontWeight: 900, color: '#ffffff' }}>{yoloQueue?.queueCount ?? 4}</div>
                 </div>
-                <div className="bg-slate-950 p-2 rounded-lg border border-slate-800">
-                  <div className="text-[9px] text-slate-500">DYNAMIC HOLD</div>
-                  <div className="text-lg font-black text-emerald-400">
+                <div style={{ background: '#020617', padding: 8, borderRadius: 8, border: '1px solid #1e293b' }}>
+                  <div style={{ fontSize: 9, color: '#64748b' }}>DYNAMIC HOLD</div>
+                  <div style={{ fontSize: 18, fontWeight: 900, color: '#4ade80' }}>
                     {yoloQueue?.recommendedHoldSeconds ?? 23}s
                   </div>
                 </div>
               </div>
 
-              {/* Interactive Queue Override Slider (or driven live by yolo_queue_analyzer.py) */}
-              <div className="mt-1">
-                <div className="flex justify-between text-[10px] text-slate-400 mb-1">
-                  <span>Simulate / Override Queue</span>
-                  <span>Source: {yoloQueue?.source || 'SIM'}</span>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#94a3b8', marginBottom: 4 }}>
+                  <span>Queue Density Slider</span>
+                  <span>{yoloQueue?.source || 'SIM'}</span>
                 </div>
                 <input
                   type="range"
@@ -631,9 +792,9 @@ export default function Dashboard() {
                   max="16"
                   value={yoloQueue?.queueCount ?? 4}
                   onChange={(e) => updateYoloQueue(e.target.value, 'DASHBOARD_SLIDER')}
-                  className="w-full accent-sky-400 cursor-pointer"
+                  style={{ width: '100%', accentColor: '#38bdf8', cursor: 'pointer' }}
                 />
-                <div className="flex justify-between text-[9px] text-slate-500">
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: '#64748b' }}>
                   <span>0 cars (14s)</span>
                   <span>6 cars (28s)</span>
                   <span>12+ (Gridlock)</span>
@@ -642,31 +803,100 @@ export default function Dashboard() {
             </div>
 
             {/* Live V2X & Vector Filter Audit Log Stream */}
-            <div className="flex-1 min-h-[160px] max-h-[260px] bg-slate-900/90 border border-slate-800 rounded-xl p-3 flex flex-col">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-1.5 mb-2">
-                <span className="text-[10px] font-bold text-emerald-400 tracking-wider">
-                  🛡️ V2X & VECTOR AUDIT TRAIL
+            <div
+              style={{
+                flex: 1,
+                minHeight: 150,
+                maxHeight: 240,
+                background: 'rgba(15, 23, 42, 0.9)',
+                border: '1px solid #1e293b',
+                borderRadius: 12,
+                padding: 12,
+                display: 'flex',
+                flexDirection: 'column',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  borderBottom: '1px solid #1e293b',
+                  paddingBottom: 6,
+                  marginBottom: 8,
+                }}
+              >
+                <span style={{ fontSize: 10, fontWeight: 800, color: '#4ade80', letterSpacing: 1 }}>
+                  🛡️ V2X & VECTOR AUDIT
                 </span>
-                <span className="text-[9px] text-slate-500">
+                <span style={{ fontSize: 9, color: '#64748b' }}>
                   Latency: {telemetry?.dispatchLatencyMs ?? 3.2}ms
                 </span>
               </div>
-              <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 text-[10px]">
+              <div style={{ flex: 1, overflowY: 'auto', fontSize: 10, paddingRight: 4 }}>
                 {[...auditLogs].reverse().map((log) => (
                   <div
                     key={log.id}
-                    className="border-b border-slate-800/60 pb-1 last:border-0 leading-relaxed"
+                    style={{
+                      borderBottom: '1px solid rgba(30, 41, 59, 0.6)',
+                      paddingBottom: 5,
+                      marginBottom: 5,
+                      lineHeight: 1.45,
+                    }}
                   >
-                    <span className="text-slate-500 mr-1.5">{log.timestamp}</span>
+                    <span style={{ color: '#64748b', marginRight: 6 }}>{log.timestamp}</span>
                     {log.category && (
-                      <span className="text-sky-400 font-bold mr-1.5">[{log.category}]</span>
+                      <span style={{ color: '#38bdf8', fontWeight: 700, marginRight: 6 }}>[{log.category}]</span>
                     )}
-                    <span className="text-slate-200">{log.message}</span>
+                    <span style={{ color: '#e2e8f0' }}>{log.message}</span>
                   </div>
                 ))}
               </div>
             </div>
           </aside>
+        )}
+
+        {/* ── Bottom-Right / Floating Deadlock Bypass Pill (When Queue >= 12 Cars) ── */}
+        {routing?.deadlockRerouteActive && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 16,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 35,
+              background: 'rgba(245, 158, 11, 0.95)',
+              color: '#020617',
+              padding: '7px 16px',
+              borderRadius: 999,
+              fontSize: 11,
+              fontWeight: 900,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              boxShadow: '0 8px 28px rgba(245, 158, 11, 0.45)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <span>
+              ⚠️ GRIDLOCK DETECTED ({yoloQueue?.queueCount} CARS) • REROUTED VIA: {corridor.bypassName}
+            </span>
+            <button
+              onClick={() => updateYoloQueue(4, 'OPERATOR_CLEAR_GRIDLOCK')}
+              style={{
+                padding: '3px 9px',
+                borderRadius: 999,
+                background: '#020617',
+                color: '#fcd34d',
+                fontSize: 9.5,
+                fontWeight: 800,
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              CLEAR GRIDLOCK
+            </button>
+          </div>
         )}
       </div>
     </main>

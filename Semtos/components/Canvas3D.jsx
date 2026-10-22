@@ -11,12 +11,25 @@ function Loader() {
   const { progress } = useProgress();
   return (
     <Html center zIndexRange={[100, 0]}>
-      <div className="flex flex-col items-center justify-center p-8 bg-slate-900/90 border border-emerald-500/50 rounded-lg shadow-2xl backdrop-blur-xl w-72">
-        <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mb-6"></div>
-        <div className="text-emerald-400 font-mono font-bold tracking-widest text-sm text-center">
-          LOADING DIGITAL TWIN
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 28,
+          background: 'rgba(2, 6, 23, 0.94)',
+          border: '1.5px solid #22c55e',
+          borderRadius: 14,
+          fontFamily: 'monospace',
+          width: 280,
+          boxShadow: '0 0 32px rgba(34,197,94,0.35)',
+        }}
+      >
+        <div style={{ color: '#4ade80', fontWeight: 800, letterSpacing: 2, fontSize: 12, textAlign: 'center' }}>
+          LOADING BENGALURU 3D TWIN
         </div>
-        <div className="text-slate-300 font-mono text-xl mt-3 font-bold">
+        <div style={{ color: '#f8fafc', fontSize: 22, marginTop: 10, fontWeight: 900 }}>
           {progress.toFixed(0)}%
         </div>
       </div>
@@ -47,7 +60,7 @@ export function CameraTracker({ isFreeRoam, editMode, boundaryMode, isRoadCam, i
   const modeLabel = isFrozen
     ? 'FROZEN (Press F to Unfreeze)'
     : isRoadCam
-    ? 'CCTV ROAD CAM (YOLOv8 AI Vision Active)'
+    ? 'BTP CCTV AI CAM (YOLOv8 Queue Vision)'
     : editMode
     ? 'EDIT MODE (Unlocked)'
     : boundaryMode
@@ -70,27 +83,45 @@ export function CameraTracker({ isFreeRoam, editMode, boundaryMode, isRoadCam, i
         zIndex: 50,
       }}
     >
-      <div style={{ position: 'fixed', bottom: '18px', left: '18px', pointerEvents: 'auto' }}>
-        <div className="bg-slate-950/90 text-emerald-400 p-3 rounded-xl border border-emerald-500/50 font-mono text-xs whitespace-nowrap shadow-xl backdrop-blur-md">
-          <div className="mb-1 text-emerald-400 font-bold flex items-center justify-between gap-4">
+      <div style={{ position: 'fixed', bottom: 18, left: 18, pointerEvents: 'auto' }}>
+        <div
+          style={{
+            background: 'rgba(2, 6, 23, 0.92)',
+            color: '#4ade80',
+            padding: '10px 14px',
+            borderRadius: 12,
+            border: '1px solid rgba(34, 197, 94, 0.45)',
+            fontFamily: 'monospace',
+            fontSize: 11,
+            whiteSpace: 'nowrap',
+            boxShadow: '0 10px 28px rgba(0,0,0,0.8)',
+            backdropFilter: 'blur(10px)',
+          }}
+        >
+          <div style={{ marginBottom: 4, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14 }}>
             <span>
-              CAM: <span className="text-white">{modeLabel}</span>
+              CAM: <span style={{ color: '#ffffff' }}>{modeLabel}</span>
             </span>
             <button
               onClick={onToggleRoadCam}
-              className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${
-                isRoadCam
-                  ? 'bg-sky-500 text-slate-950 border-sky-300'
-                  : 'bg-slate-900 text-sky-400 border-sky-500/40 hover:bg-slate-800'
-              }`}
+              style={{
+                padding: '3px 8px',
+                borderRadius: 6,
+                fontSize: 10,
+                fontWeight: 800,
+                cursor: 'pointer',
+                background: isRoadCam ? '#38bdf8' : '#0f172a',
+                color: isRoadCam ? '#020617' : '#38bdf8',
+                border: '1px solid #38bdf8',
+              }}
             >
               {isRoadCam ? '🎥 AI CCTV ON [V]' : '🎥 AI CCTV OFF [V]'}
             </button>
           </div>
-          <div className="text-[10px] text-slate-400 mb-1">
-            [ENTER] Dispatch | [N] Adaptive Normal Cycle | [V] AI CCTV Cam | [C] Free Roam | [F] Freeze
+          <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 3 }}>
+            [ENTER] Dispatch | [N] Adaptive Cycle | [V] BTP AI CCTV | [C] Free Roam | [F] Freeze
           </div>
-          <strong>POS:</strong> <span ref={textRef} className="text-slate-200">Loading...</span>
+          <strong>POS:</strong> <span ref={textRef} style={{ color: '#e2e8f0' }}>Loading...</span>
         </div>
       </div>
     </Html>
@@ -108,15 +139,9 @@ export function FreeRoamFlightCamera() {
     const dom = gl.domElement;
     euler.current.setFromQuaternion(camera.quaternion);
 
-    try {
-      dom.requestPointerLock?.();
-    } catch (_) {}
-
     const onKeyDown = (e) => {
-      if (e.key === 'Control' || e.code === 'ControlLeft' || e.code === 'ControlRight' || e.code === 'Escape') {
-        if (document.pointerLockElement) {
-          document.exitPointerLock?.();
-        }
+      if (e.key === 'Control' || e.code === 'Escape') {
+        if (document.pointerLockElement) document.exitPointerLock?.();
         return;
       }
       if (e.code === 'KeyW' || e.code === 'ArrowUp') keys.current.w = true;
@@ -136,37 +161,21 @@ export function FreeRoamFlightCamera() {
       if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'KeyQ') keys.current.shift = false;
     };
 
-    const onClick = () => {
-      if (document.pointerLockElement !== dom) {
-        dom.requestPointerLock?.();
-      }
-    };
-
     const onMouseDown = (e) => {
       isDragging.current = true;
       prevMouse.current = { x: e.clientX, y: e.clientY };
     };
 
     const onMouseMove = (e) => {
+      if (!isDragging.current) return;
       euler.current.setFromQuaternion(camera.quaternion);
-      if (document.pointerLockElement === dom) {
-        const movementX = e.movementX || 0;
-        const movementY = e.movementY || 0;
-        euler.current.y -= movementX * 0.0025;
-        euler.current.x -= movementY * 0.0025;
-        euler.current.x = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, euler.current.x));
-        camera.quaternion.setFromEuler(euler.current);
-        return;
-      }
-      if (isDragging.current) {
-        const dx = e.clientX - prevMouse.current.x;
-        const dy = e.clientY - prevMouse.current.y;
-        prevMouse.current = { x: e.clientX, y: e.clientY };
-        euler.current.y -= dx * 0.003;
-        euler.current.x -= dy * 0.003;
-        euler.current.x = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, euler.current.x));
-        camera.quaternion.setFromEuler(euler.current);
-      }
+      const dx = e.clientX - prevMouse.current.x;
+      const dy = e.clientY - prevMouse.current.y;
+      prevMouse.current = { x: e.clientX, y: e.clientY };
+      euler.current.y -= dx * 0.003;
+      euler.current.x -= dy * 0.003;
+      euler.current.x = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, euler.current.x));
+      camera.quaternion.setFromEuler(euler.current);
     };
 
     const onMouseUp = () => {
@@ -180,19 +189,14 @@ export function FreeRoamFlightCamera() {
 
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
-    dom.addEventListener('click', onClick);
     dom.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
     dom.addEventListener('wheel', onWheel, { passive: true });
 
     return () => {
-      if (document.pointerLockElement === dom) {
-        document.exitPointerLock?.();
-      }
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
-      dom.removeEventListener('click', onClick);
       dom.removeEventListener('mousedown', onMouseDown);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
@@ -225,17 +229,17 @@ export function CinematicCamera({ ambulancePosition }) {
     const targetLookAt = new THREE.Vector3();
 
     if (ambulancePosition.x < -45) {
-      targetPosition.set(-55.0, 12.0, 14.0);
-      targetLookAt.set(-15.0, 2.0, -6.0);
+      targetPosition.set(-52.0, 11.5, 13.5);
+      targetLookAt.set(-12.0, 2.0, -5.0);
     } else if (ambulancePosition.x >= -45 && ambulancePosition.x < -10) {
-      targetPosition.set(ambulancePosition.x - 14, 5.0, -2.89);
-      targetLookAt.set(ambulancePosition.x + 10, 2.0, -2.89);
-    } else if (ambulancePosition.x >= -10 && ambulancePosition.x < 12) {
-      targetPosition.set(-15.0, 6.0, -2.89);
+      targetPosition.set(ambulancePosition.x - 14, 5.2, -2.89);
+      targetLookAt.set(ambulancePosition.x + 12, 2.0, -2.89);
+    } else if (ambulancePosition.x >= -10 && ambulancePosition.x < 14) {
+      targetPosition.set(-15.0, 6.2, -2.89);
       targetLookAt.set(ambulancePosition.x, 2.0, ambulancePosition.z);
     } else {
-      targetPosition.set(0.03, 80.57, -1.22);
-      targetLookAt.set(0.03, 0, -1.22);
+      targetPosition.set(-18.0, 24.0, 22.0);
+      targetLookAt.set(0.0, 1.5, -2.0);
     }
 
     state.camera.position.lerp(targetPosition, delta * 2.0);
@@ -266,41 +270,120 @@ export function AmbulanceApproachCamera({ ambulancePosition, isSimulationRunning
   return null;
 }
 
-function TrafficLightPole({ position, rotation, nsGreen, nsYellow, ewGreen, ewYellow, isNS }) {
-  const gap = 0.22;
+// ── Realistic Cantilevered Overhead Traffic Signal Mast Gantry ───────────────
+function SignalHeadBox({ position, red, yellow, green }) {
+  const gap = 0.26;
+  const redCol = red ? '#ef4444' : '#2a1215';
+  const yellowCol = yellow ? '#facc15' : '#2a2410';
+  const greenCol = green ? '#22c55e' : '#0b2414';
+
+  return (
+    <group position={position}>
+      {/* Backplate & Visor Housing */}
+      <mesh position={[0, 0, 0]}>
+        <boxGeometry args={[0.38, 0.96, 0.24]} />
+        <meshStandardMaterial color="#0f172a" metalness={0.6} roughness={0.4} />
+      </mesh>
+      <mesh position={[0, 0, -0.02]}>
+        <boxGeometry args={[0.44, 1.02, 0.04]} />
+        <meshStandardMaterial color="#cbd5e1" />
+      </mesh>
+
+      {/* Red Aspect */}
+      <mesh position={[0, gap, 0.13]}>
+        <sphereGeometry args={[0.105, 16, 16]} />
+        <meshBasicMaterial color={redCol} />
+      </mesh>
+      {red && <pointLight position={[0, gap, 0.35]} color="#ef4444" intensity={12} distance={18} />}
+
+      {/* Yellow Aspect */}
+      <mesh position={[0, 0, 0.13]}>
+        <sphereGeometry args={[0.105, 16, 16]} />
+        <meshBasicMaterial color={yellowCol} />
+      </mesh>
+      {yellow && <pointLight position={[0, 0, 0.35]} color="#facc15" intensity={10} distance={15} />}
+
+      {/* Green Aspect */}
+      <mesh position={[0, -gap, 0.13]}>
+        <sphereGeometry args={[0.105, 16, 16]} />
+        <meshBasicMaterial color={greenCol} />
+      </mesh>
+      {green && <pointLight position={[0, -gap, 0.35]} color="#22c55e" intensity={18} distance={24} />}
+    </group>
+  );
+}
+
+function TrafficLightGantry({
+  position,
+  rotation,
+  nsGreen,
+  nsYellow,
+  ewGreen,
+  ewYellow,
+  isNS,
+  signTitle,
+  signSub,
+}) {
   const green = isNS ? nsGreen : ewGreen;
   const yellow = isNS ? nsYellow : ewYellow;
   const red = !green && !yellow;
 
-  const redCol = red ? '#ef4444' : '#2d1515';
-  const yellowCol = yellow ? '#facc15' : '#2d2510';
-  const greenCol = green ? '#22c55e' : '#0d2010';
-
   return (
     <group position={position} rotation={rotation}>
-      <mesh position={[0, -1.2, 0]}>
-        <cylinderGeometry args={[0.04, 0.04, 2.4, 8]} />
-        <meshStandardMaterial color="#334155" />
+      {/* Heavy Vertical Steel Mast Column anchored to sidewalk */}
+      <mesh position={[0, -1.6, 0]} castShadow>
+        <cylinderGeometry args={[0.14, 0.18, 6.2, 16]} />
+        <meshStandardMaterial color="#334155" metalness={0.75} roughness={0.3} />
       </mesh>
-      <mesh position={[0, 0, 0]}>
-        <boxGeometry args={[0.22, 0.75, 0.18]} />
-        <meshStandardMaterial color="#1e293b" />
+      {/* Concrete Pedestal Base */}
+      <mesh position={[0, -4.4, 0]}>
+        <cylinderGeometry args={[0.28, 0.32, 0.8, 16]} />
+        <meshStandardMaterial color="#475569" roughness={0.8} />
       </mesh>
-      <mesh position={[0, gap, 0]}>
-        <sphereGeometry args={[0.08, 16, 16]} />
-        <meshBasicMaterial color={redCol} />
+
+      {/* Horizontal Cantilevered Mast Arm extending 5.8m over the road lanes */}
+      <mesh position={[2.8, 1.25, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+        <cylinderGeometry args={[0.09, 0.12, 5.8, 12]} />
+        <meshStandardMaterial color="#334155" metalness={0.75} roughness={0.3} />
       </mesh>
-      {red && <pointLight color="#ef4444" intensity={8} distance={12} />}
-      <mesh position={[0, 0, 0]}>
-        <sphereGeometry args={[0.08, 16, 16]} />
-        <meshBasicMaterial color={yellowCol} />
+
+      {/* Overhead Warm LED Streetlamp Luminaire at top of mast */}
+      <mesh position={[1.4, 1.55, 0.2]}>
+        <boxGeometry args={[0.6, 0.1, 0.28]} />
+        <meshBasicMaterial color="#fef08a" />
       </mesh>
-      {yellow && <pointLight color="#facc15" intensity={6} distance={10} />}
-      <mesh position={[0, -gap, 0]}>
-        <sphereGeometry args={[0.08, 16, 16]} />
-        <meshBasicMaterial color={greenCol} />
-      </mesh>
-      {green && <pointLight color="#22c55e" intensity={14} distance={18} />}
+      <pointLight position={[2.2, 1.2, 0.5]} color="#fde68a" intensity={6} distance={26} />
+
+      {/* Dual Overhead Signal Heads (Primary & Secondary Lane Aspects) */}
+      <SignalHeadBox position={[2.3, 0.65, 0.18]} red={red} yellow={yellow} green={green} />
+      <SignalHeadBox position={[4.6, 0.65, 0.18]} red={red} yellow={yellow} green={green} />
+
+      {/* Bengaluru BBMP / Traffic Police Overhead Highway Signboard */}
+      {signTitle && (
+        <Html position={[3.4, 1.95, 0]} center distanceFactor={38} zIndexRange={[10, 0]}>
+          <div
+            style={{
+              background: 'linear-gradient(180deg, #065f46 0%, #064e3b 100%)',
+              border: '2px solid #f8fafc',
+              borderRadius: 6,
+              padding: '4px 10px',
+              color: '#ffffff',
+              fontFamily: 'monospace',
+              textAlign: 'center',
+              whiteSpace: 'nowrap',
+              boxShadow: '0 4px 14px rgba(0,0,0,0.75)',
+              pointerEvents: 'none',
+            }}
+          >
+            <div style={{ fontSize: 9, fontWeight: 900, letterSpacing: 1 }}>{signTitle}</div>
+            {signSub && (
+              <div style={{ fontSize: 7.5, color: '#a7f3d0', fontWeight: 700, marginTop: 1 }}>
+                {signSub}
+              </div>
+            )}
+          </div>
+        </Html>
+      )}
     </group>
   );
 }
@@ -316,10 +399,34 @@ export function TrafficLightOverlay({
 
   return (
     <group>
-      <TrafficLightPole {...nProps} position={[-4.2, 4.2, -9.5]} rotation={[0, 0, 0]} />
-      <TrafficLightPole {...sProps} position={[3.8, 4.2, 9.5]} rotation={[0, Math.PI, 0]} />
-      <TrafficLightPole {...eProps} position={[12.0, 4.2, -1.5]} rotation={[0, -Math.PI / 2, 0]} />
-      <TrafficLightPole {...wProps} position={[-12.0, 4.2, 7.5]} rotation={[0, Math.PI / 2, 0]} />
+      <TrafficLightGantry
+        {...nProps}
+        position={[-7.5, 4.2, -10.5]}
+        rotation={[0, 0, 0]}
+        signTitle="BRIGADE RD JUNCTION • BENGALURU"
+        signSub="↑ RESIDENCY RD 0.6 KM | SHIVAJINAGAR ←"
+      />
+      <TrafficLightGantry
+        {...sProps}
+        position={[7.5, 4.2, 10.5]}
+        rotation={[0, Math.PI, 0]}
+        signTitle="MAYO HALL • MG ROAD CORRIDOR"
+        signSub="↑ CUBBON PARK 0.9 KM"
+      />
+      <TrafficLightGantry
+        {...eProps}
+        position={[12.5, 4.2, -8.5]}
+        rotation={[0, -Math.PI / 2, 0]}
+        signTitle="MG ROAD GREEN CORRIDOR (BTP V2X)"
+        signSub="↑ ANIL KUMBLE CIRCLE | 🏥 BOWRING HOSPITAL 0.8 KM"
+      />
+      <TrafficLightGantry
+        {...wProps}
+        position={[-12.5, 4.2, 8.5]}
+        rotation={[0, Math.PI / 2, 0]}
+        signTitle="TRINITY CIRCLE • INDIRANAGAR →"
+        signSub="NAMMA METRO PURPLE LINE CORRIDOR"
+      />
     </group>
   );
 }
@@ -353,7 +460,6 @@ export function Canvas3D({
   const localVehiclesRef = useRef([]);
   const vehiclesRef = externalVehiclesRef || localVehiclesRef;
 
-  // Automatically enable/disable CCTV AI Vision Road Cam when switching Cases (e.g. Case 02)
   useEffect(() => {
     setIsRoadCam(Boolean(defaultRoadCam));
   }, [defaultRoadCam]);
@@ -389,13 +495,16 @@ export function Canvas3D({
 
   return (
     <Canvas shadows={{ type: THREE.PCFShadowMap }} camera={{ position: [0, 50, 150], fov: 45 }}>
-      <color attach="background" args={['#020617']} />
-      <fog attach="fog" args={['#020617', 50, 400]} />
+      {/* Realistic Dusk Smart-City Atmosphere */}
+      <color attach="background" args={['#071022']} />
+      <fog attach="fog" args={['#071022', 65, 380]} />
 
-      <ambientLight intensity={0.5} />
+      <hemisphereLight skyColor="#38bdf8" groundColor="#0f172a" intensity={0.65} />
+      <ambientLight intensity={0.55} />
       <directionalLight
-        position={[150, 200, 100]}
-        intensity={1.5}
+        position={[140, 190, 90]}
+        intensity={1.75}
+        color="#f8fafc"
         castShadow
         shadow-camera-left={-150}
         shadow-camera-right={150}
@@ -403,7 +512,7 @@ export function Canvas3D({
         shadow-camera-bottom={-150}
         shadow-mapSize={[2048, 2048]}
       />
-      <directionalLight position={[-100, 50, -100]} intensity={0.3} />
+      <directionalLight position={[-110, 65, -90]} intensity={0.45} color="#fdba74" />
 
       <Suspense fallback={<Loader />}>
         <CityScene isPreempted={isPreempted} />
