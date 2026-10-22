@@ -236,6 +236,7 @@ export default function Dashboard() {
     setStarted(true);
     if (c.id === 2) {
       updateYoloQueue(7, 'CASE_02_ADAPTIVE_DEMO');
+      onNormalCycle();
     } else if (c.id === 3) {
       updateYoloQueue(13, 'CASE_03_DEADLOCK_DEMO');
     } else {
@@ -568,6 +569,7 @@ export default function Dashboard() {
                 isPreempted={isPreempted}
                 isFrozen={isFrozen}
                 signalPhase={signalPhase}
+                defaultRoadCam={activeCaseId === 2}
                 nGreen={nGreen} sGreen={sGreen} eGreen={eGreen} wGreen={wGreen}
                 nYellow={nYellow} sYellow={sYellow} eYellow={eYellow} wYellow={wYellow}
               />

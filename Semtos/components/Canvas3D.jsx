@@ -1,6 +1,6 @@
 import React, { Suspense, useRef, useState, useEffect } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Html, useProgress, PointerLockControls, TransformControls, useGLTF, Center, OrbitControls } from '@react-three/drei';
+import { Html, useProgress, Center, OrbitControls, useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { CityScene } from './CityScene';
 import { Ambulance3D } from './Ambulance3D';
@@ -24,38 +24,37 @@ function Loader() {
   );
 }
 
-export function CameraTracker({ isFreeRoam, editMode, boundaryMode, isRoadCam, isFrozen }) {
+export function CameraTracker({ isFreeRoam, editMode, boundaryMode, isRoadCam, isFrozen, onToggleRoadCam }) {
   const textRef = useRef();
 
   useFrame((state) => {
     if (textRef.current) {
       const { x, y, z } = state.camera.position;
-      
       const vector = new THREE.Vector3(0, 0, -1);
       vector.applyQuaternion(state.camera.quaternion);
-      
-      let heading = "";
+
+      let heading = '';
       if (Math.abs(vector.x) > Math.abs(vector.z)) {
-          heading = vector.x > 0 ? "EAST (+X)" : "WEST (-X)";
+        heading = vector.x > 0 ? 'EAST (+X)' : 'WEST (-X)';
       } else {
-          heading = vector.z > 0 ? "SOUTH (+Z)" : "NORTH (-Z)";
+        heading = vector.z > 0 ? 'SOUTH (+Z)' : 'NORTH (-Z)';
       }
 
-      textRef.current.innerText = `X: ${x.toFixed(2)} | Y: ${y.toFixed(2)} | Z: ${z.toFixed(2)} | FACING: ${heading}`;
+      textRef.current.innerText = `X: ${x.toFixed(1)} | Y: ${y.toFixed(1)} | Z: ${z.toFixed(1)} (${heading})`;
     }
   });
 
   const modeLabel = isFrozen
     ? 'FROZEN (Press F to Unfreeze)'
     : isRoadCam
-    ? 'CCTV ROAD CAM (AI Vision Active)'
+    ? 'CCTV ROAD CAM (YOLOv8 AI Vision Active)'
     : editMode
     ? 'EDIT MODE (Unlocked)'
     : boundaryMode
     ? 'BOUNDARY MODE (Unlocked)'
     : isFreeRoam
-    ? 'FREE ROAM ([WASD] Fly | [Mouse] Look | [Ctrl] Unlock Mouse | [C] Exit)'
-    : 'CINEMATIC';
+    ? 'FREE ROAM ([WASD] Fly | [C] Exit)'
+    : 'CINEMATIC CHASE';
 
   return (
     <Html
@@ -71,15 +70,27 @@ export function CameraTracker({ isFreeRoam, editMode, boundaryMode, isRoadCam, i
         zIndex: 50,
       }}
     >
-      <div style={{ position: 'fixed', top: '20px', right: '20px', pointerEvents: 'none' }}>
-        <div className="bg-black/85 text-emerald-400 p-3 rounded-lg border border-emerald-500 font-mono text-sm whitespace-nowrap shadow-xl backdrop-blur-md">
-          <div className="mb-1 text-xs text-emerald-500 font-bold">
-            MODE: <span className="text-white">{modeLabel}</span>
+      <div style={{ position: 'fixed', bottom: '18px', left: '18px', pointerEvents: 'auto' }}>
+        <div className="bg-slate-950/90 text-emerald-400 p-3 rounded-xl border border-emerald-500/50 font-mono text-xs whitespace-nowrap shadow-xl backdrop-blur-md">
+          <div className="mb-1 text-emerald-400 font-bold flex items-center justify-between gap-4">
+            <span>
+              CAM: <span className="text-white">{modeLabel}</span>
+            </span>
+            <button
+              onClick={onToggleRoadCam}
+              className={`px-2 py-0.5 rounded text-[10px] font-bold border transition ${
+                isRoadCam
+                  ? 'bg-sky-500 text-slate-950 border-sky-300'
+                  : 'bg-slate-900 text-sky-400 border-sky-500/40 hover:bg-slate-800'
+              }`}
+            >
+              {isRoadCam ? '🎥 AI CCTV ON [V]' : '🎥 AI CCTV OFF [V]'}
+            </button>
           </div>
-          <div className="text-xs text-slate-400 mb-1">
-            [ENTER] Dispatch | [C] Free Roam | [F] Freeze | [V] Road Cam
+          <div className="text-[10px] text-slate-400 mb-1">
+            [ENTER] Dispatch | [N] Adaptive Normal Cycle | [V] AI CCTV Cam | [C] Free Roam | [F] Freeze
           </div>
-          <strong>CAMERA:</strong> <span ref={textRef} className="text-slate-200">Loading...</span>
+          <strong>POS:</strong> <span ref={textRef} className="text-slate-200">Loading...</span>
         </div>
       </div>
     </Html>
@@ -97,20 +108,17 @@ export function FreeRoamFlightCamera() {
     const dom = gl.domElement;
     euler.current.setFromQuaternion(camera.quaternion);
 
-    // Request pointer lock when free roam starts
     try {
       dom.requestPointerLock?.();
     } catch (_) {}
 
     const onKeyDown = (e) => {
-      // Release mouse pointer when hitting Control or Escape
       if (e.key === 'Control' || e.code === 'ControlLeft' || e.code === 'ControlRight' || e.code === 'Escape') {
         if (document.pointerLockElement) {
           document.exitPointerLock?.();
         }
         return;
       }
-
       if (e.code === 'KeyW' || e.code === 'ArrowUp') keys.current.w = true;
       if (e.code === 'KeyS' || e.code === 'ArrowDown') keys.current.s = true;
       if (e.code === 'KeyA' || e.code === 'ArrowLeft') keys.current.a = true;
@@ -129,7 +137,6 @@ export function FreeRoamFlightCamera() {
     };
 
     const onClick = () => {
-      // Re-lock mouse pointer on click
       if (document.pointerLockElement !== dom) {
         dom.requestPointerLock?.();
       }
@@ -142,25 +149,19 @@ export function FreeRoamFlightCamera() {
 
     const onMouseMove = (e) => {
       euler.current.setFromQuaternion(camera.quaternion);
-
-      // Case 1: Pointer Lock active (seamless mouse look without pointer)
       if (document.pointerLockElement === dom) {
         const movementX = e.movementX || 0;
         const movementY = e.movementY || 0;
-
         euler.current.y -= movementX * 0.0025;
         euler.current.x -= movementY * 0.0025;
         euler.current.x = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, euler.current.x));
         camera.quaternion.setFromEuler(euler.current);
         return;
       }
-
-      // Case 2: Unlocked pointer drag fallback
       if (isDragging.current) {
         const dx = e.clientX - prevMouse.current.x;
         const dy = e.clientY - prevMouse.current.y;
         prevMouse.current = { x: e.clientX, y: e.clientY };
-
         euler.current.y -= dx * 0.003;
         euler.current.x -= dy * 0.003;
         euler.current.x = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, euler.current.x));
@@ -223,28 +224,20 @@ export function CinematicCamera({ ambulancePosition }) {
     const targetPosition = new THREE.Vector3();
     const targetLookAt = new THREE.Vector3();
 
-    // PHASE 1: Wide establishing view — watching the ambulance approach from the distance and the road flush
     if (ambulancePosition.x < -45) {
       targetPosition.set(-55.0, 12.0, 14.0);
       targetLookAt.set(-15.0, 2.0, -6.0);
-    } 
-    // PHASE 2: IMMEDIATE FOLLOW - Lock smoothly behind the ambulance as it enters the parted corridor
-    else if (ambulancePosition.x >= -45 && ambulancePosition.x < -10) {
+    } else if (ambulancePosition.x >= -45 && ambulancePosition.x < -10) {
       targetPosition.set(ambulancePosition.x - 14, 5.0, -2.89);
       targetLookAt.set(ambulancePosition.x + 10, 2.0, -2.89);
-    } 
-    // PHASE 3: Intersection Hero Shot (Hold position to show Green Signal & clearance)
-    else if (ambulancePosition.x >= -10 && ambulancePosition.x < 12) {
+    } else if (ambulancePosition.x >= -10 && ambulancePosition.x < 12) {
       targetPosition.set(-15.0, 6.0, -2.89);
       targetLookAt.set(ambulancePosition.x, 2.0, ambulancePosition.z);
-    }
-    // PHASE 4: Bird's-Eye Command Center View
-    else {
+    } else {
       targetPosition.set(0.03, 80.57, -1.22);
       targetLookAt.set(0.03, 0, -1.22);
     }
 
-    // Smooth camera position and lookAt interpolation
     state.camera.position.lerp(targetPosition, delta * 2.0);
     currentLookAt.current.lerp(targetLookAt, delta * 2.5);
     state.camera.lookAt(currentLookAt.current);
@@ -257,10 +250,7 @@ export function AmbulanceApproachCamera({ ambulancePosition, isSimulationRunning
   const currentLookAt = useRef(new THREE.Vector3(-30.0, 1.2, -6.0));
 
   useFrame((state, delta) => {
-    // Overhead CCTV gantry camera position
     const targetPosition = new THREE.Vector3(2.5, 8.5, -5.5);
-    
-    // Focus down the open avenue to watch the flush and ambulance approach
     let targetLookAt;
     if (!isSimulationRunning || ambulancePosition.x <= -85) {
       targetLookAt = new THREE.Vector3(-30.0, 1.2, -6.0);
@@ -276,46 +266,36 @@ export function AmbulanceApproachCamera({ ambulancePosition, isSimulationRunning
   return null;
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Traffic Light Overlay – 4 poles, one per road arm, real R/Y/G state
-// Positions are tuned to sit at the four corners of the intersection.
-// ──────────────────────────────────────────────────────────────────────────────
 function TrafficLightPole({ position, rotation, nsGreen, nsYellow, ewGreen, ewYellow, isNS }) {
   const gap = 0.22;
-  const green  = isNS ? nsGreen  : ewGreen;
+  const green = isNS ? nsGreen : ewGreen;
   const yellow = isNS ? nsYellow : ewYellow;
-  const red    = !green && !yellow;
+  const red = !green && !yellow;
 
-  const redCol    = red    ? '#ef4444' : '#2d1515';
+  const redCol = red ? '#ef4444' : '#2d1515';
   const yellowCol = yellow ? '#facc15' : '#2d2510';
-  const greenCol  = green  ? '#22c55e' : '#0d2010';
+  const greenCol = green ? '#22c55e' : '#0d2010';
 
   return (
     <group position={position} rotation={rotation}>
-      {/* Pole */}
       <mesh position={[0, -1.2, 0]}>
         <cylinderGeometry args={[0.04, 0.04, 2.4, 8]} />
         <meshStandardMaterial color="#334155" />
       </mesh>
-      {/* Housing */}
       <mesh position={[0, 0, 0]}>
         <boxGeometry args={[0.22, 0.75, 0.18]} />
         <meshStandardMaterial color="#1e293b" />
       </mesh>
-      {/* RED bulb */}
       <mesh position={[0, gap, 0]}>
         <sphereGeometry args={[0.08, 16, 16]} />
         <meshBasicMaterial color={redCol} />
       </mesh>
-      {/* Point light for active bulb */}
       {red && <pointLight color="#ef4444" intensity={8} distance={12} />}
-      {/* YELLOW bulb */}
       <mesh position={[0, 0, 0]}>
         <sphereGeometry args={[0.08, 16, 16]} />
         <meshBasicMaterial color={yellowCol} />
       </mesh>
       {yellow && <pointLight color="#facc15" intensity={6} distance={10} />}
-      {/* GREEN bulb */}
       <mesh position={[0, -gap, 0]}>
         <sphereGeometry args={[0.08, 16, 16]} />
         <meshBasicMaterial color={greenCol} />
@@ -325,31 +305,27 @@ function TrafficLightPole({ position, rotation, nsGreen, nsYellow, ewGreen, ewYe
   );
 }
 
-export function TrafficLightOverlay({ nGreen=false, sGreen=false, eGreen=false, wGreen=false, nYellow=false, sYellow=false, eYellow=false, wYellow=false }) {
-  // Each pole gets its own independent R/Y/G state
-  const nProps = { nsGreen: nGreen, nsYellow: nYellow, ewGreen: false,  ewYellow: false,  isNS: true  };
-  const sProps = { nsGreen: sGreen, nsYellow: sYellow, ewGreen: false,  ewYellow: false,  isNS: true  };
-  const eProps = { nsGreen: false,  nsYellow: false,   ewGreen: eGreen, ewYellow: eYellow, isNS: false };
-  const wProps = { nsGreen: false,  nsYellow: false,   ewGreen: wGreen, ewYellow: wYellow, isNS: false };
+export function TrafficLightOverlay({
+  nGreen = false, sGreen = false, eGreen = false, wGreen = false,
+  nYellow = false, sYellow = false, eYellow = false, wYellow = false,
+}) {
+  const nProps = { nsGreen: nGreen, nsYellow: nYellow, ewGreen: false, ewYellow: false, isNS: true };
+  const sProps = { nsGreen: sGreen, nsYellow: sYellow, ewGreen: false, ewYellow: false, isNS: true };
+  const eProps = { nsGreen: false, nsYellow: false, ewGreen: eGreen, ewYellow: eYellow, isNS: false };
+  const wProps = { nsGreen: false, nsYellow: false, ewGreen: wGreen, ewYellow: wYellow, isNS: false };
 
   return (
     <group>
-      {/* North arm – signal faces south-bound traffic */}
-      <TrafficLightPole {...nProps} position={[-4.2, 4.2, -9.5]}  rotation={[0, 0, 0]} />
-      {/* South arm – signal faces north-bound traffic */}
-      <TrafficLightPole {...sProps} position={[3.8,  4.2,  9.5]}  rotation={[0, Math.PI, 0]} />
-      {/* East arm – signal faces west-bound traffic */}
-      <TrafficLightPole {...eProps} position={[12.0, 4.2, -1.5]}  rotation={[0, -Math.PI / 2, 0]} />
-      {/* West arm – signal faces east-bound traffic (ambulance road) */}
-      <TrafficLightPole {...wProps} position={[-12.0, 4.2, 7.5]}  rotation={[0, Math.PI / 2, 0]} />
+      <TrafficLightPole {...nProps} position={[-4.2, 4.2, -9.5]} rotation={[0, 0, 0]} />
+      <TrafficLightPole {...sProps} position={[3.8, 4.2, 9.5]} rotation={[0, Math.PI, 0]} />
+      <TrafficLightPole {...eProps} position={[12.0, 4.2, -1.5]} rotation={[0, -Math.PI / 2, 0]} />
+      <TrafficLightPole {...wProps} position={[-12.0, 4.2, 7.5]} rotation={[0, Math.PI / 2, 0]} />
     </group>
   );
 }
 
-
 export function CctvOverlay() {
   const { scene: cctvScene } = useGLTF('/cctv.glb');
-
   return (
     <group position={[-4.91, 3.65, -2.80]} rotation={[0, 26 * (Math.PI / 180), 0]}>
       <Center>
@@ -359,13 +335,28 @@ export function CctvOverlay() {
   );
 }
 
-export function Canvas3D({ vehiclesRef: externalVehiclesRef, ambulancePosition, isSimulationRunning = false, isPreempted, isFrozen, signalPhase, nGreen=false, sGreen=false, eGreen=false, wGreen=false, nYellow=false, sYellow=false, eYellow=false, wYellow=false }) {
+export function Canvas3D({
+  vehiclesRef: externalVehiclesRef,
+  ambulancePosition,
+  isSimulationRunning = false,
+  isPreempted,
+  isFrozen,
+  signalPhase,
+  defaultRoadCam = false,
+  nGreen = false, sGreen = false, eGreen = false, wGreen = false,
+  nYellow = false, sYellow = false, eYellow = false, wYellow = false,
+}) {
   const [isFreeRoam, setIsFreeRoam] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [boundaryMode, setBoundaryMode] = useState(false);
-  const [isRoadCam, setIsRoadCam] = useState(false);
+  const [isRoadCam, setIsRoadCam] = useState(defaultRoadCam);
   const localVehiclesRef = useRef([]);
   const vehiclesRef = externalVehiclesRef || localVehiclesRef;
+
+  // Automatically enable/disable CCTV AI Vision Road Cam when switching Cases (e.g. Case 02)
+  useEffect(() => {
+    setIsRoadCam(Boolean(defaultRoadCam));
+  }, [defaultRoadCam]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -380,16 +371,14 @@ export function Canvas3D({ vehiclesRef: externalVehiclesRef, ambulancePosition, 
         setIsRoadCam(false);
       }
       if (e.code === 'KeyE') {
-        setEditMode(prev => !prev);
+        setEditMode((prev) => !prev);
         setBoundaryMode(false);
         setIsRoadCam(false);
-        console.log("🛠️ EDIT MODE TOGGLED");
       }
       if (e.code === 'KeyB') {
-        setBoundaryMode(prev => !prev);
+        setBoundaryMode((prev) => !prev);
         setEditMode(false);
         setIsRoadCam(false);
-        console.log("🚧 BOUNDARY MODE TOGGLED");
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -400,26 +389,20 @@ export function Canvas3D({ vehiclesRef: externalVehiclesRef, ambulancePosition, 
 
   return (
     <Canvas shadows={{ type: THREE.PCFShadowMap }} camera={{ position: [0, 50, 150], fov: 45 }}>
-      {/* Dark Mode Atmosphere */}
       <color attach="background" args={['#020617']} />
       <fog attach="fog" args={['#020617', 50, 400]} />
-      
-      {/* Adequate Lighting */}
+
       <ambientLight intensity={0.5} />
-      
-      {/* Main Directional Light with Shadows */}
-      <directionalLight 
-        position={[150, 200, 100]} 
-        intensity={1.5} 
-        castShadow 
+      <directionalLight
+        position={[150, 200, 100]}
+        intensity={1.5}
+        castShadow
         shadow-camera-left={-150}
         shadow-camera-right={150}
         shadow-camera-top={150}
         shadow-camera-bottom={-150}
-        shadow-mapSize={[2048, 2048]} 
+        shadow-mapSize={[2048, 2048]}
       />
-
-      {/* Fill light */}
       <directionalLight position={[-100, 50, -100]} intensity={0.3} />
 
       <Suspense fallback={<Loader />}>
@@ -451,26 +434,15 @@ export function Canvas3D({ vehiclesRef: externalVehiclesRef, ambulancePosition, 
         )}
       </Suspense>
 
-      {/* ── DEV TOOL: Click anywhere on the road to log exact 3D coordinates ──
-           Open F12 → Console, then click the asphalt to get X, Y, Z readouts.
-           Set visible={false} to hide the plane without removing the listener.  */}
-      <mesh
-        rotation={[-Math.PI / 2, 0, 0]}
-        position={[0, 0.01, 0]}
-        visible={false}
-        onClick={(e) => {
-          e.stopPropagation();
-          const { x, y, z } = e.point;
-          console.log(`ROAD POINT → X: ${x.toFixed(2)}, Y: ${y.toFixed(2)}, Z: ${z.toFixed(2)}`);
-        }}
-      >
-        <planeGeometry args={[500, 500]} />
-        <meshBasicMaterial transparent opacity={0} />
-      </mesh>
+      <CameraTracker
+        isFreeRoam={isFreeRoam}
+        editMode={editMode}
+        boundaryMode={boundaryMode}
+        isRoadCam={isRoadCam}
+        isFrozen={isFrozen}
+        onToggleRoadCam={() => setIsRoadCam((prev) => !prev)}
+      />
 
-      <CameraTracker isFreeRoam={isFreeRoam} editMode={editMode} boundaryMode={boundaryMode} isRoadCam={isRoadCam} isFrozen={isFrozen} />
-
-      {/* Use OrbitControls when editing so the mouse isn't locked! */}
       {showOrbitControls ? (
         <OrbitControls makeDefault />
       ) : isFreeRoam ? (
