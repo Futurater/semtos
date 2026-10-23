@@ -3,8 +3,8 @@
 /**
  * SEMTOS — Smart Emergency Management and Traffic Orchestration System
  * ============================================================================
- * File: Semtos/src/app/page.js (Unified Bengaluru 3D Digital Twin &
- *       V2X Command Center Dashboard)
+ * File: Semtos/src/app/page.js (Unified Bengaluru 3D Digital Twin,
+ *       Live Traffic Feed & V2X Command Center Dashboard)
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -187,6 +187,7 @@ export default function Dashboard() {
     dispatchAmbulance: dispatchGeoAmbulance,
     toggleFreeze: toggleGeoFreeze,
     toggleRealPhoneGps: toggleGeoPhoneGps,
+    toggleLiveTrafficIncident,
   } = useGeospatialSimulation(selectedCorridorKey);
 
   useEffect(() => {
@@ -211,10 +212,10 @@ export default function Dashboard() {
     {
       id: 1,
       label: 'CASE 01',
-      title: 'Bengaluru Green Corridor Preemption (3D Map & Twin)',
+      title: 'Bengaluru Live Traffic Feed & Green Corridor (3D Map & Twin)',
       description:
-        'OSRM road-snapped Bengaluru corridors (MG Road, Hosur Road, Indiranagar) with Haversine ETA tracking, directional vector alerts, and BLE failover.',
-      tags: ['Bengaluru 3D Map', 'Road-Snapped OSRM', 'Dot-Product Filter', '3D Digital Twin'],
+        'Live color-coded Bengaluru traffic flow (MG Road, Hosur Road, Indiranagar) where AMB-108 flushes red congestion segments ahead into green free-flow lanes.',
+      tags: ['Live Traffic Feed', '3D Extruded Buildings', 'Locked Zoom (Zero Lag)', '3D Digital Twin'],
       color: '#22c55e',
       available: true,
       defaultView: 'SPLIT',
@@ -233,10 +234,10 @@ export default function Dashboard() {
     {
       id: 3,
       label: 'CASE 03',
-      title: 'Multi-Junction Green Wave & Deadlock Bypass',
+      title: 'Live Traffic Jam Auto-Diversion & Multi-Junction Wave',
       description:
-        'Automated gridlock detection (>= 12 queued vehicles) that triggers dynamic Bengaluru parallel-road bypass rerouting and 3-junction Green Wave cascade.',
-      tags: ['Deadlock Detection', 'Cubbon Rd Bypass', 'J1 → J2 → J3 Wave', 'V2I Security'],
+        'Automated live traffic jam detection (>= 12 queued vehicles) that diverts AMB-108 onto the parallel free-flow Bengaluru bypass corridor.',
+      tags: ['Live Jam Detection', 'Cubbon Rd Bypass', 'J1 → J2 → J3 Wave', 'V2I Security'],
       color: '#a78bfa',
       available: true,
       defaultView: 'MAP',
@@ -290,7 +291,7 @@ export default function Dashboard() {
             SEMTOS CMD
           </h1>
           <p style={{ color: '#94a3b8', fontSize: 13, marginTop: 10, maxWidth: 640, lineHeight: 1.7 }}>
-            Smart Emergency Management and Traffic Orchestration System — Road-Snapped Bengaluru Emergency Green Corridors (MG Road, Silk Board–Hosur Rd, Indiranagar 100 Ft Rd).
+            Smart Emergency Management and Traffic Orchestration System — Live Traffic Feed & Road-Snapped Bengaluru Emergency Green Corridors (MG Road, Silk Board–Hosur Rd, Indiranagar 100 Ft Rd).
           </p>
 
           <div style={{ display: 'flex', gap: 14, justifyContent: 'center', marginTop: 18, flexWrap: 'wrap' }}>
@@ -657,7 +658,7 @@ export default function Dashboard() {
         >
           <span style={{ fontSize: 13 }}>🚨</span>
           <span style={{ fontSize: 11, fontWeight: 900, color: '#ffffff', letterSpacing: 1.2 }}>
-            GREEN CORRIDOR PREEMPTED — BENGALURU V2X ACTIVE • HOLD: {yoloQueue?.recommendedHoldSeconds || 23}s
+            LIVE TRAFFIC FLUSHING GREEN — BENGALURU V2X ACTIVE • HOLD: {yoloQueue?.recommendedHoldSeconds || 23}s
           </span>
         </div>
       )}
@@ -681,6 +682,7 @@ export default function Dashboard() {
               onDispatch={handleUnifiedDispatch}
               onToggleFreeze={toggleGeoFreeze}
               onTogglePhoneGps={toggleGeoPhoneGps}
+              onToggleTrafficIncident={toggleLiveTrafficIncident}
             />
           </div>
         )}
@@ -783,7 +785,7 @@ export default function Dashboard() {
 
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#94a3b8', marginBottom: 4 }}>
-                  <span>Queue Density Slider</span>
+                  <span>Live Traffic Queue Slider</span>
                   <span>{yoloQueue?.source || 'SIM'}</span>
                 </div>
                 <input
@@ -795,8 +797,8 @@ export default function Dashboard() {
                   style={{ width: '100%', accentColor: '#38bdf8', cursor: 'pointer' }}
                 />
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: '#64748b' }}>
-                  <span>0 cars (14s)</span>
-                  <span>6 cars (28s)</span>
+                  <span>0 cars (Free)</span>
+                  <span>6 cars (Heavy)</span>
                   <span>12+ (Gridlock)</span>
                 </div>
               </div>
@@ -856,8 +858,8 @@ export default function Dashboard() {
           </aside>
         )}
 
-        {/* ── Bottom-Right / Floating Deadlock Bypass Pill (When Queue >= 12 Cars) ── */}
-        {routing?.deadlockRerouteActive && (
+        {/* ── Floating Deadlock Bypass Pill (When Live Traffic Jam / Queue >= 12 Cars) ── */}
+        {(routing?.deadlockRerouteActive || geoSimState.deadlockRerouteActive) && (
           <div
             style={{
               position: 'absolute',
@@ -879,10 +881,10 @@ export default function Dashboard() {
             }}
           >
             <span>
-              ⚠️ GRIDLOCK DETECTED ({yoloQueue?.queueCount} CARS) • REROUTED VIA: {corridor.bypassName}
+              ⚠️ LIVE TRAFFIC GRIDLOCK DETECTED • AMB-108 DIVERTED VIA: {corridor.bypassName}
             </span>
             <button
-              onClick={() => updateYoloQueue(4, 'OPERATOR_CLEAR_GRIDLOCK')}
+              onClick={toggleLiveTrafficIncident}
               style={{
                 padding: '3px 9px',
                 borderRadius: 999,
@@ -894,7 +896,7 @@ export default function Dashboard() {
                 cursor: 'pointer',
               }}
             >
-              CLEAR GRIDLOCK
+              CLEAR TRAFFIC JAM
             </button>
           </div>
         )}

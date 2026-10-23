@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
-// ── Geodesic Circle Generator for BLE Radar Dome ────────────────────────────
+// ── 1. Geodesic Circle Generator for BLE Radar Dome ─────────────────────────
 function createGeoJsonCircle(center, radiusInMeters, points = 64) {
   if (!center || !Array.isArray(center) || center.length < 2) {
     return {
@@ -37,9 +37,141 @@ function createGeoJsonCircle(center, radiusInMeters, points = 64) {
   };
 }
 
+// ── 2. Procedural 3D Bengaluru Building Extrusion Generator ─────────────────
+// Guarantees 100% reliable 3D buildings (`fill-extrusion`) along both sides of
+// any Bengaluru corridor without relying on fragile external vector tile servers!
+function generateCorridor3DBuildingsGeoJson(routeCoords) {
+  const features = [];
+  if (!Array.isArray(routeCoords) || routeCoords.length < 2) {
+    return { type: 'FeatureCollection', features };
+  }
+
+  const palette = ['#1e293b', '#172554', '#0f172a', '#1e3a5f', '#1e293b', '#273549'];
+
+  for (let i = 0; i < routeCoords.length - 1; i++) {
+    const [lon1, lat1] = routeCoords[i];
+    const [lon2, lat2] = routeCoords[i + 1];
+    const dx = lon2 - lon1;
+    const dy = lat2 - lat1;
+    const segLen = Math.hypot(dx, dy);
+    if (segLen < 0.00015) continue;
+
+    // Unit normal perpendicular to road segment
+    const nx = -dy / segLen;
+    const ny = dx / segLen;
+    const tx = dx / segLen;
+    const ty = dy / segLen;
+
+    const steps = Math.max(1, Math.min(4, Math.floor(segLen / 0.00055)));
+    for (let s = 0; s < steps; s++) {
+      const frac = (s + 0.5) / steps;
+      const baseLon = lon1 + dx * frac;
+      const baseLat = lat1 + dy * frac;
+
+      // Place 3D commercial/tech-park buildings on both Left (+1) and Right (-1) sides of the avenue
+      [-1, 1].forEach((side, sideIdx) => {
+        // Row 1: Front avenue buildings (set back ~26m from road centerline so road is never covered)
+        const setbackDeg = 0.00027 * side;
+        const halfWidth = 0.00014 + ((i + s) % 3) * 0.00004;
+        const halfDepth = 0.00012 + ((i + sideIdx) % 2) * 0.00005;
+
+        const cx = baseLon + nx * setbackDeg;
+        const cy = baseLat + ny * setbackDeg;
+
+        const p1 = [cx - tx * halfWidth - nx * halfDepth, cy - ty * halfWidth - ny * halfDepth];
+        const p2 = [cx + tx * halfWidth - nx * halfDepth, cy + ty * halfWidth - ny * halfDepth];
+        const p3 = [cx + tx * halfWidth + nx * halfDepth, cy + ty * halfWidth + ny * halfDepth];
+        const p4 = [cx - tx * halfWidth + nx * halfDepth, cy - ty * halfWidth + ny * halfDepth];
+
+        const heightMeters = 18 + ((i * 7 + s * 13 + sideIdx * 11) % 44);
+        features.push({
+          type: 'Feature',
+          properties: {
+            height: heightMeters,
+            base: 0,
+            color: palette[(i + s + sideIdx) % palette.length],
+          },
+          geometry: {
+            type: 'Polygon',
+            coordinates: [[p1, p2, p3, p4, p1]],
+          },
+        });
+
+        // Row 2: Secondary skyline block further back (~68m from road)
+        const setback2 = 0.00066 * side;
+        const cx2 = baseLon + nx * setback2;
+        const cy2 = baseLat + ny * setback2;
+        const hw2 = halfWidth * 1.15;
+        const hd2 = halfDepth * 1.25;
+
+        const q1 = [cx2 - tx * hw2 - nx * hd2, cy2 - ty * hw2 - ny * hd2];
+        const q2 = [cx2 + tx * hw2 - nx * hd2, cy2 + ty * hw2 - ny * hd2];
+        const q3 = [cx2 + tx * hw2 + nx * hd2, cy2 + ty * hw2 + ny * hd2];
+        const q4 = [cx2 - tx * hw2 + nx * hd2, cy2 - ty * hw2 + ny * hd2];
+
+        features.push({
+          type: 'Feature',
+          properties: {
+            height: 28 + ((i * 11 + s * 5 + sideIdx * 17) % 55),
+            base: 0,
+            color: palette[(i + s + 2) % palette.length],
+          },
+          geometry: {
+            type: 'Polygon',
+            coordinates: [[q1, q2, q3, q4, q1]],
+          },
+        });
+      });
+    }
+  }
+
+  return { type: 'FeatureCollection', features };
+}
+
+// ── 3. Instant-Loading Multi-CDN Basemap Styles (Zero External Vector Failures) ──
+const BENGALURU_3D_DARK_STYLE = {
+  version: 8,
+  name: 'Bengaluru 3D Smart City + Live Traffic (Default)',
+  sources: {
+    'carto-dark': {
+      type: 'raster',
+      tiles: [
+        'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+        'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+        'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+      ],
+      tileSize: 256,
+      maxzoom: 19,
+    },
+  },
+  layers: [
+    { id: 'carto-dark-layer', type: 'raster', source: 'carto-dark', minzoom: 0, maxzoom: 19 },
+  ],
+};
+
+const BENGALURU_3D_COLOR_STREETS_STYLE = {
+  version: 8,
+  name: 'Bengaluru 3D Color Streets + Live Traffic',
+  sources: {
+    'carto-voyager': {
+      type: 'raster',
+      tiles: [
+        'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
+        'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
+        'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
+      ],
+      tileSize: 256,
+      maxzoom: 19,
+    },
+  },
+  layers: [
+    { id: 'carto-voyager-layer', type: 'raster', source: 'carto-voyager', minzoom: 0, maxzoom: 19 },
+  ],
+};
+
 const ESRI_SATELLITE_STYLE = {
   version: 8,
-  name: 'Bengaluru Satellite 3D Hybrid',
+  name: 'Bengaluru 3D Satellite Hybrid + Live Traffic',
   sources: {
     'esri-satellite': {
       type: 'raster',
@@ -47,7 +179,7 @@ const ESRI_SATELLITE_STYLE = {
         'https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
       ],
       tileSize: 256,
-      attribution: '© Esri, Maxar',
+      maxzoom: 19,
     },
     'esri-satellite-labels': {
       type: 'raster',
@@ -55,63 +187,30 @@ const ESRI_SATELLITE_STYLE = {
         'https://services.arcgisonline.com/arcgis/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
       ],
       tileSize: 256,
-    },
-    'esri-places-labels': {
-      type: 'raster',
-      tiles: [
-        'https://services.arcgisonline.com/arcgis/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
-      ],
-      tileSize: 256,
+      maxzoom: 19,
     },
   },
   layers: [
     { id: 'satellite-base', type: 'raster', source: 'esri-satellite', minzoom: 0, maxzoom: 19 },
     { id: 'satellite-roads', type: 'raster', source: 'esri-satellite-labels', minzoom: 0, maxzoom: 19 },
-    { id: 'satellite-places', type: 'raster', source: 'esri-places-labels', minzoom: 0, maxzoom: 19 },
   ],
 };
 
-const ESRI_DARK_STYLE = {
-  version: 8,
-  name: 'Cyber Dark Raster',
-  sources: {
-    'esri-dark-base': {
-      type: 'raster',
-      tiles: [
-        'https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
-      ],
-      tileSize: 256,
-    },
-    'esri-dark-labels': {
-      type: 'raster',
-      tiles: [
-        'https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
-      ],
-      tileSize: 256,
-    },
-  },
-  layers: [
-    { id: 'esri-base-layer', type: 'raster', source: 'esri-dark-base', minzoom: 0, maxzoom: 19 },
-    { id: 'esri-labels-layer', type: 'raster', source: 'esri-dark-labels', minzoom: 0, maxzoom: 19 },
-  ],
-};
-
-// Default to OpenFreeMap 3D Vector (True 3D Extruded Bengaluru Buildings + Vector Roads)
 const MAP_STYLES = [
   {
-    id: 'openfree-3d-bengaluru',
-    name: 'Bengaluru 3D Vector Buildings (Default)',
-    url: 'https://tiles.openfreemap.org/styles/liberty',
+    id: 'blr-3d-dark',
+    name: 'Bengaluru 3D Smart City + Live Traffic (Default)',
+    style: BENGALURU_3D_DARK_STYLE,
+  },
+  {
+    id: 'blr-3d-color',
+    name: 'Bengaluru 3D Color Streets + Live Traffic',
+    style: BENGALURU_3D_COLOR_STREETS_STYLE,
   },
   {
     id: 'esri-satellite',
-    name: 'Bengaluru Photorealistic Satellite + Roads',
+    name: 'Bengaluru 3D Satellite Hybrid + Live Traffic',
     style: ESRI_SATELLITE_STYLE,
-  },
-  {
-    id: 'esri-dark',
-    name: 'Dark Tactical Raster',
-    style: ESRI_DARK_STYLE,
   },
 ];
 
@@ -121,6 +220,7 @@ export function MapboxSimulation({
   civilianVehicles,
   onDispatch,
   onToggleFreeze,
+  onToggleTrafficIncident,
 }) {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
@@ -129,8 +229,11 @@ export function MapboxSimulation({
   const signalMarkersRef = useRef([]);
   const civilianMarkersRef = useRef(new Map());
 
-  const [cameraMode, setCameraMode] = useState('CHASE');
+  // DEFAULT IS 'LOCKED' (Static Corridor View) so the map NEVER zooms in or reloads tiles when simulation starts!
+  const [cameraMode, setCameraMode] = useState('LOCKED');
   const [selectedStyleIndex, setSelectedStyleIndex] = useState(0);
+  const [show3DBuildings, setShow3DBuildings] = useState(true);
+  const [showLiveTrafficLayer, setShowLiveTrafficLayer] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [mapLoaded, setMapLoaded] = useState(false);
 
@@ -164,7 +267,6 @@ export function MapboxSimulation({
         mapLibRef.current = maplibregl;
 
         const styleObj = MAP_STYLES[selectedStyleIndex] || MAP_STYLES[0];
-        const mapStyle = styleObj.style || styleObj.url;
 
         if (mapRef.current) {
           try { mapRef.current.remove(); } catch (_) {}
@@ -173,10 +275,10 @@ export function MapboxSimulation({
 
         const map = new maplibregl.Map({
           container: mapContainerRef.current,
-          style: mapStyle,
+          style: styleObj.style,
           center: corridor.center,
-          zoom: corridor.zoom || 16.5,
-          pitch: corridor.pitch || 62,
+          zoom: corridor.zoom || 15.6,
+          pitch: corridor.pitch || 52,
           bearing: corridor.bearing || 284,
           antialias: true,
           attributionControl: false,
@@ -186,28 +288,49 @@ export function MapboxSimulation({
           if (isCancelled) return;
           mapRef.current = map;
 
-          // Restyle vector layers into a sleek Dark Smart-City 3D Twin aesthetic if using OpenFreeMap
+          // Optional Live TomTom Traffic Raster Flow Tile Layer if user configures NEXT_PUBLIC_TOMTOM_KEY
+          const tomtomKey =
+            typeof process !== 'undefined' ? process.env?.NEXT_PUBLIC_TOMTOM_KEY : null;
+          if (tomtomKey) {
+            try {
+              map.addSource('tomtom-live-traffic', {
+                type: 'raster',
+                tiles: [
+                  `https://api.tomtom.com/traffic/map/4/tile/flow/relative0/{z}/{x}/{y}.png?key=${tomtomKey}&tileSize=256`,
+                ],
+                tileSize: 256,
+              });
+              map.addLayer({
+                id: 'tomtom-live-traffic-layer',
+                type: 'raster',
+                source: 'tomtom-live-traffic',
+                paint: { 'raster-opacity': 0.85 },
+              });
+            } catch (_) {}
+          }
+
+          // 1. 3D Extruded Bengaluru Corridor Buildings (`fill-extrusion` — 100% reliable local GeoJSON!)
           try {
-            const layers = map.getStyle()?.layers || [];
-            layers.forEach((layer) => {
-              if (layer.type === 'background') {
-                map.setPaintProperty(layer.id, 'background-color', '#060d1a');
-              } else if (layer.type === 'fill' && (layer.id.includes('land') || layer.id.includes('park'))) {
-                map.setPaintProperty(layer.id, 'fill-color', '#0a1628');
-              } else if (layer.type === 'fill' && layer.id.includes('water')) {
-                map.setPaintProperty(layer.id, 'fill-color', '#022c43');
-              } else if (layer.type === 'line' && (layer.id.includes('road') || layer.id.includes('highway') || layer.id.includes('transportation'))) {
-                map.setPaintProperty(layer.id, 'line-color', '#1e293b');
-              } else if (layer.type === 'fill-extrusion' || layer.id.includes('building')) {
-                if (layer.type === 'fill-extrusion') {
-                  map.setPaintProperty(layer.id, 'fill-extrusion-color', '#16243d');
-                  map.setPaintProperty(layer.id, 'fill-extrusion-opacity', 0.88);
-                }
-              }
+            const buildingsGeoJson = generateCorridor3DBuildingsGeoJson(corridor.route);
+            map.addSource('blr-3d-buildings', {
+              type: 'geojson',
+              data: buildingsGeoJson,
+            });
+
+            map.addLayer({
+              id: 'blr-3d-buildings-extrusion',
+              type: 'fill-extrusion',
+              source: 'blr-3d-buildings',
+              paint: {
+                'fill-extrusion-color': ['get', 'color'],
+                'fill-extrusion-height': ['get', 'height'],
+                'fill-extrusion-base': ['get', 'base'],
+                'fill-extrusion-opacity': 0.82,
+              },
             });
           } catch (_) {}
 
-          // 1. Primary Road-Snapped Emergency Corridor (Outer Glow + Core + Center Lane Line)
+          // 2. Base Road Asphalt Casing for Primary Corridor
           try {
             map.addSource('preemption-route', {
               type: 'geojson',
@@ -227,51 +350,77 @@ export function MapboxSimulation({
               layout: { 'line-join': 'round', 'line-cap': 'round' },
               paint: {
                 'line-color': '#0f172a',
-                'line-width': 22,
-                'line-opacity': 0.85,
+                'line-width': 20,
+                'line-opacity': 0.9,
               },
             });
+          } catch (_) {}
 
+          // 3. LIVE BENGALURU TRAFFIC FEED LAYER (Color-Coded Multi-Segment Traffic Congestion: Red/Orange/Yellow/Green)
+          try {
+            const initialTrafficData = corridor.liveTrafficGeoJson || {
+              type: 'FeatureCollection',
+              features: [],
+            };
+
+            map.addSource('live-traffic-feed', {
+              type: 'geojson',
+              data: initialTrafficData,
+            });
+
+            // Outer Traffic Congestion Halo
             map.addLayer({
-              id: 'route-glow',
+              id: 'live-traffic-glow',
               type: 'line',
-              source: 'preemption-route',
+              source: 'live-traffic-feed',
               layout: { 'line-join': 'round', 'line-cap': 'round' },
               paint: {
-                'line-color': '#10b981',
-                'line-width': 18,
+                'line-color': ['get', 'glow'],
+                'line-width': [
+                  'case',
+                  ['==', ['get', 'roadType'], 'CROSS_STREET'],
+                  10,
+                  18,
+                ],
                 'line-opacity': 0.45,
-                'line-blur': 6,
+                'line-blur': 5,
               },
             });
 
+            // Core Live Traffic Flow Band (Green = Free Flow, Yellow = Moderate, Orange = Heavy, Red = Gridlock)
             map.addLayer({
-              id: 'route-inner',
+              id: 'live-traffic-core',
               type: 'line',
-              source: 'preemption-route',
+              source: 'live-traffic-feed',
               layout: { 'line-join': 'round', 'line-cap': 'round' },
               paint: {
-                'line-color': '#22c55e',
-                'line-width': 6,
-                'line-opacity': 0.98,
+                'line-color': ['get', 'color'],
+                'line-width': [
+                  'case',
+                  ['==', ['get', 'roadType'], 'CROSS_STREET'],
+                  4.5,
+                  8,
+                ],
+                'line-opacity': 0.96,
               },
             });
 
+            // Center directional lane dashes on primary corridor
             map.addLayer({
               id: 'route-center-dashes',
               type: 'line',
               source: 'preemption-route',
               layout: { 'line-join': 'round', 'line-cap': 'round' },
               paint: {
-                'line-color': '#dcfce7',
-                'line-width': 1.8,
+                'line-color': '#f8fafc',
+                'line-width': 1.6,
                 'line-dasharray': [2, 3],
-                'line-opacity': 0.9,
+                'line-opacity': 0.85,
               },
             });
           } catch (_) {}
 
-          // 2. Deadlock Bypass Corridor Line
+          // 4. Parallel Free-Flow Bypass Corridor Line
           try {
             if (corridor.bypassRoute) {
               map.addSource('bypass-route', {
@@ -291,10 +440,10 @@ export function MapboxSimulation({
                 source: 'bypass-route',
                 layout: { 'line-join': 'round', 'line-cap': 'round' },
                 paint: {
-                  'line-color': '#f59e0b',
+                  'line-color': '#10b981',
                   'line-width': 12,
                   'line-blur': 5,
-                  'line-opacity': 0.28,
+                  'line-opacity': 0.25,
                 },
               });
 
@@ -304,7 +453,7 @@ export function MapboxSimulation({
                 source: 'bypass-route',
                 layout: { 'line-join': 'round', 'line-cap': 'round' },
                 paint: {
-                  'line-color': '#f59e0b',
+                  'line-color': '#38bdf8',
                   'line-width': 4,
                   'line-dasharray': [2, 2],
                   'line-opacity': 0.85,
@@ -313,7 +462,7 @@ export function MapboxSimulation({
             }
           } catch (_) {}
 
-          // 3. BLE Geodesic Radar Ring
+          // 5. BLE Geodesic Radar Ring
           try {
             const initialCircle = createGeoJsonCircle(corridor.route[0], 110);
             map.addSource('ble-wave', {
@@ -327,7 +476,7 @@ export function MapboxSimulation({
               source: 'ble-wave',
               paint: {
                 'fill-color': '#06b6d4',
-                'fill-opacity': 0.16,
+                'fill-opacity': 0.15,
               },
             });
 
@@ -337,7 +486,7 @@ export function MapboxSimulation({
               source: 'ble-wave',
               paint: {
                 'line-color': '#22d3ee',
-                'line-width': 2.5,
+                'line-width': 2.2,
                 'line-dasharray': [3, 2],
                 'line-opacity': 0.9,
               },
@@ -347,7 +496,7 @@ export function MapboxSimulation({
           setMapLoaded(true);
           setTimeout(() => {
             if (mapRef.current) mapRef.current.resize();
-          }, 150);
+          }, 120);
         });
       } catch (err) {
         console.error('[MAP-ENGINE] Failed to initialize map:', err);
@@ -372,7 +521,7 @@ export function MapboxSimulation({
     };
   }, [corridor.id, selectedStyleIndex]);
 
-  // ---- Dynamically Update Road-Snapped Polyline Geometry When OSRM Finishes ----
+  // ---- Dynamically Update Road-Snapped Polyline & 3D Buildings When OSRM Finishes ----
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
@@ -384,6 +533,10 @@ export function MapboxSimulation({
           geometry: { type: 'LineString', coordinates: corridor.route },
         });
       }
+      const buildingsSrc = map.getSource('blr-3d-buildings');
+      if (buildingsSrc && Array.isArray(corridor.route) && corridor.route.length >= 2) {
+        buildingsSrc.setData(generateCorridor3DBuildingsGeoJson(corridor.route));
+      }
       const bypassSrc = map.getSource('bypass-route');
       if (bypassSrc && Array.isArray(corridor.bypassRoute) && corridor.bypassRoute.length >= 2) {
         bypassSrc.setData({
@@ -394,32 +547,57 @@ export function MapboxSimulation({
     } catch (_) {}
   }, [corridor.route, corridor.bypassRoute, mapLoaded]);
 
-  // ---- Highlight Bypass Route vs Primary Route When Deadlock Rerouting Toggles ----
+  // ---- Stream Real-Time Live Traffic Feed Segments onto the Map ----
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded || !corridor.liveTrafficGeoJson) return;
+    try {
+      const trafficSrc = map.getSource('live-traffic-feed');
+      if (trafficSrc) {
+        trafficSrc.setData(corridor.liveTrafficGeoJson);
+      }
+    } catch (_) {}
+  }, [corridor.liveTrafficGeoJson, mapLoaded]);
+
+  // ---- Toggle 3D Buildings & Live Traffic Layer Visibility ----
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+    try {
+      if (map.getLayer('blr-3d-buildings-extrusion')) {
+        map.setLayoutProperty(
+          'blr-3d-buildings-extrusion',
+          'visibility',
+          show3DBuildings ? 'visible' : 'none'
+        );
+      }
+      ['live-traffic-glow', 'live-traffic-core'].forEach((layerId) => {
+        if (map.getLayer(layerId)) {
+          map.setLayoutProperty(layerId, 'visibility', showLiveTrafficLayer ? 'visible' : 'none');
+        }
+      });
+    } catch (_) {}
+  }, [show3DBuildings, showLiveTrafficLayer, mapLoaded]);
+
+  // ---- Highlight Bypass Route When Live Traffic Gridlock Rerouting Activates ----
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
     try {
       const isBypass = Boolean(simState.deadlockRerouteActive);
-      if (map.getLayer('route-inner')) {
-        map.setPaintProperty('route-inner', 'line-color', isBypass ? '#ef4444' : '#22c55e');
-        map.setPaintProperty('route-inner', 'line-opacity', isBypass ? 0.45 : 0.98);
-      }
-      if (map.getLayer('route-glow')) {
-        map.setPaintProperty('route-glow', 'line-color', isBypass ? '#ef4444' : '#10b981');
-      }
       if (map.getLayer('bypass-route-line')) {
-        map.setPaintProperty('bypass-route-line', 'line-color', isBypass ? '#38bdf8' : '#f59e0b');
-        map.setPaintProperty('bypass-route-line', 'line-width', isBypass ? 6.5 : 3.5);
+        map.setPaintProperty('bypass-route-line', 'line-color', isBypass ? '#22c55e' : '#38bdf8');
+        map.setPaintProperty('bypass-route-line', 'line-width', isBypass ? 7 : 3.5);
         map.setPaintProperty('bypass-route-line', 'line-opacity', isBypass ? 1.0 : 0.65);
       }
       if (map.getLayer('bypass-route-glow')) {
-        map.setPaintProperty('bypass-route-glow', 'line-color', isBypass ? '#38bdf8' : '#f59e0b');
-        map.setPaintProperty('bypass-route-glow', 'line-opacity', isBypass ? 0.55 : 0.22);
+        map.setPaintProperty('bypass-route-glow', 'line-color', isBypass ? '#22c55e' : '#38bdf8');
+        map.setPaintProperty('bypass-route-glow', 'line-opacity', isBypass ? 0.6 : 0.2);
       }
     } catch (_) {}
   }, [simState.deadlockRerouteActive, mapLoaded]);
 
-  // ---- Update BLE Circle Layer & Smooth Chase Camera ----
+  // ---- Update BLE Circle Layer & Camera (NO AUTO-ZOOM-IN ON DISPATCH!) ----
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded || !simState.ambulancePosition) return;
@@ -435,21 +613,14 @@ export function MapboxSimulation({
       }
     } catch (_) {}
 
-    if (cameraMode === 'CHASE' && simState.isSimulationRunning && !simState.isFrozen) {
+    // Only pan gently if user explicitly clicked 'FOLLOW' mode — and NEVER change zoom or bearing!
+    if (cameraMode === 'FOLLOW' && simState.isSimulationRunning && !simState.isFrozen) {
       try {
-        map.easeTo({
-          center: [lon, lat],
-          bearing: simState.ambulanceBearing,
-          pitch: 64,
-          zoom: 17.1,
-          duration: 90,
-          easing: (t) => t,
-        });
+        map.panTo([lon, lat], { duration: 80, easing: (t) => t });
       } catch (_) {}
     }
   }, [
     simState.ambulancePosition,
-    simState.ambulanceBearing,
     simState.bleRadiusMeters,
     simState.isSimulationRunning,
     simState.isFrozen,
@@ -472,25 +643,17 @@ export function MapboxSimulation({
         el.className = 'ambulance-map-marker';
         el.innerHTML = `
           <div style="position:relative; width:36px; height:64px; display:flex; align-items:center; justify-content:center; pointer-events:none;">
-            <!-- Volumetric Headlight Beam Cones -->
             <div style="position:absolute; top:-34px; width:38px; height:42px; background:linear-gradient(to top, rgba(254,240,138,0.48) 0%, rgba(56,189,248,0.18) 60%, rgba(0,0,0,0) 100%); clip-path:polygon(25% 100%, 75% 100%, 100% 0%, 0% 0%); pointer-events:none;"></div>
-            <!-- Red/Blue Emergency Strobe Halo -->
             <div style="position:absolute; width:46px; height:46px; border-radius:50%; background:radial-gradient(circle, rgba(239,68,68,0.45) 0%, rgba(59,130,246,0.35) 55%, rgba(0,0,0,0) 75%); pointer-events:none;"></div>
-            <!-- Detailed Top-Down 3D Ambulance Chassis SVG -->
             <svg width="26" height="50" viewBox="0 0 26 50" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter:drop-shadow(0 6px 10px rgba(0,0,0,0.85));">
               <rect x="2" y="3" width="22" height="44" rx="5" fill="#f8fafc" stroke="#dc2626" stroke-width="2"/>
-              <!-- Windshield -->
               <path d="M4.5 13 L21.5 13 L19.5 7 L6.5 7 Z" fill="#0f172a" stroke="#38bdf8" stroke-width="0.8"/>
-              <!-- Roof Red/Blue Lightbar -->
               <rect x="5" y="15" width="7.5" height="3.5" rx="1" fill="#ef4444"/>
               <rect x="13.5" y="15" width="7.5" height="3.5" rx="1" fill="#3b82f6"/>
-              <!-- Medical Cross on Roof -->
               <rect x="11" y="23" width="4" height="12" rx="0.8" fill="#dc2626"/>
               <rect x="7" y="27" width="12" height="4" rx="0.8" fill="#dc2626"/>
-              <!-- Front LED Headlights -->
               <circle cx="6" cy="4" r="1.8" fill="#fef08a"/>
               <circle cx="20" cy="4" r="1.8" fill="#fef08a"/>
-              <!-- Rear Tail Lights -->
               <rect x="4" y="45" width="4" height="1.8" rx="0.5" fill="#ef4444"/>
               <rect x="18" y="45" width="4" height="1.8" rx="0.5" fill="#ef4444"/>
             </svg>
@@ -550,7 +713,6 @@ export function MapboxSimulation({
         ? 'CLEARED'
         : 'RED';
 
-      // Alternate horizontal badge offset left/right so J1, J2, J3 never overlap along the road axis
       const offsetShiftPx = idx % 2 === 0 ? -58 : 58;
 
       try {
@@ -586,7 +748,6 @@ export function MapboxSimulation({
     const markersMap = civilianMarkersRef.current;
     const activeIds = new Set(civilianVehicles.map((c) => c.id));
 
-    // Remove stale markers
     markersMap.forEach((val, key) => {
       if (!activeIds.has(key)) {
         try { val.marker.remove(); } catch (_) {}
@@ -594,7 +755,7 @@ export function MapboxSimulation({
       }
     });
 
-    const bodyColors = ['#38bdf8', '#94a3b8', '#fbbf24', '#a78bfa', '#e2e8f0', '#60a5fa', '#cbd5e1'];
+    const bodyColors = ['#38bdf8', '#94a3b8', '#fbbf24', '#a78bfa', '#e2e8f0', '#60a5fa', '#cbd5e1', '#34d399'];
 
     civilianVehicles.forEach((car, idx) => {
       let markerObj = markersMap.get(car.id);
@@ -606,18 +767,14 @@ export function MapboxSimulation({
           el.className = `civilian-car-${car.id}`;
           el.innerHTML = `
             <div style="position:relative; width:22px; height:40px; display:flex; align-items:center; justify-content:center; pointer-events:none;">
-              <!-- Headlight cone -->
               <div style="position:absolute; top:-18px; width:20px; height:20px; background:linear-gradient(to top, rgba(254,240,138,0.25) 0%, rgba(254,240,138,0) 100%); clip-path:polygon(30% 100%, 70% 100%, 100% 0%, 0% 0%);"></div>
               <svg width="18" height="34" viewBox="0 0 18 34" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter:drop-shadow(0 4px 6px rgba(0,0,0,0.75));">
                 <rect x="1.5" y="2" width="15" height="30" rx="4" fill="${paintColor}" stroke="#0f172a" stroke-width="1.2"/>
-                <!-- Windshield & Rear Glass -->
                 <path d="M3.2 10 L14.8 10 L13.5 5.5 L4.5 5.5 Z" fill="#0f172a"/>
                 <rect x="3.5" y="10.5" width="11" height="11" rx="1.5" fill="#1e293b"/>
                 <path d="M4 26 L14 26 L14.5 22.5 L3.5 22.5 Z" fill="#0f172a"/>
-                <!-- Headlights -->
                 <circle cx="4" cy="3" r="1.2" fill="#fef08a"/>
                 <circle cx="14" cy="3" r="1.2" fill="#fef08a"/>
-                <!-- Brake lights -->
                 <rect x="3" y="30.2" width="3.5" height="1.3" rx="0.4" fill="#ef4444"/>
                 <rect x="11.5" y="30.2" width="3.5" height="1.3" rx="0.4" fill="#ef4444"/>
               </svg>
@@ -657,27 +814,32 @@ export function MapboxSimulation({
     const map = mapRef.current;
     if (!map) return;
 
-    if (mode === 'INTERSECTION') {
-      const target = corridor.intersections[1] || corridor.intersections[0] || { coords: corridor.center };
-      map.flyTo({
-        center: target.coords,
-        zoom: 17.4,
-        pitch: 65,
-        bearing: corridor.bearing,
-        duration: 1100,
-      });
-    } else if (mode === 'OVERVIEW') {
-      map.flyTo({
+    if (mode === 'LOCKED') {
+      map.JumpTo
+        ? map.jumpTo({
+            center: corridor.center,
+            zoom: corridor.zoom || 15.6,
+            pitch: corridor.pitch || 52,
+            bearing: corridor.bearing || 284,
+          })
+        : map.easeTo({
+            center: corridor.center,
+            zoom: corridor.zoom || 15.6,
+            pitch: corridor.pitch || 52,
+            bearing: corridor.bearing || 284,
+            duration: 400,
+          });
+    } else if (mode === 'TOP_2D') {
+      map.easeTo({
         center: corridor.center,
-        zoom: 15.5,
-        pitch: 48,
-        bearing: corridor.bearing,
-        duration: 1100,
+        zoom: corridor.zoom || 15.5,
+        pitch: 0,
+        bearing: 0,
+        duration: 450,
       });
     }
   };
 
-  // Explicit inline styles guarantee zero overlap regardless of Tailwind compilation
   return (
     <div
       style={{
@@ -705,20 +867,20 @@ export function MapboxSimulation({
         }}
       />
 
-      {/* ── Top-Left Bengaluru Corridor & Green Wave HUD Card ── */}
+      {/* ── Top-Left Bengaluru Live Traffic & Green Wave HUD Card ── */}
       <div
         style={{
           position: 'absolute',
           top: 16,
           left: 16,
           zIndex: 20,
-          width: 315,
-          background: 'rgba(2, 6, 23, 0.90)',
+          width: 325,
+          background: 'rgba(2, 6, 23, 0.92)',
           border: '1px solid rgba(34, 197, 94, 0.45)',
           backdropFilter: 'blur(12px)',
           borderRadius: 14,
-          padding: '14px 16px',
-          boxShadow: '0 12px 32px rgba(0, 0, 0, 0.75)',
+          padding: '13px 15px',
+          boxShadow: '0 12px 32px rgba(0, 0, 0, 0.78)',
           color: '#f1f5f9',
           pointerEvents: 'auto',
         }}
@@ -729,8 +891,8 @@ export function MapboxSimulation({
             alignItems: 'center',
             justifyContent: 'space-between',
             borderBottom: '1px solid #1e293b',
-            paddingBottom: 8,
-            marginBottom: 10,
+            paddingBottom: 7,
+            marginBottom: 8,
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
@@ -743,8 +905,8 @@ export function MapboxSimulation({
                 boxShadow: '0 0 8px #22c55e',
               }}
             />
-            <span style={{ fontSize: 10, letterSpacing: 1.4, color: '#4ade80', fontWeight: 800 }}>
-              BENGALURU 3D GREEN CORRIDOR
+            <span style={{ fontSize: 10, letterSpacing: 1.2, color: '#4ade80', fontWeight: 800 }}>
+              BTP LIVE TRAFFIC & V2X CORRIDOR
             </span>
           </div>
           <span
@@ -753,47 +915,73 @@ export function MapboxSimulation({
               padding: '2px 6px',
               borderRadius: 4,
               background: '#0f172a',
-              color: simState.v2xConnected ? '#34d399' : '#fbbf24',
+              color: '#38bdf8',
               border: '1px solid #334155',
               fontWeight: 700,
             }}
           >
-            {simState.v2xConnected ? 'V2X LIVE' : 'LOCAL SIM'}
+            LOCKED ZOOM (NO LAG)
           </span>
         </div>
 
-        <div style={{ fontSize: 13, fontWeight: 800, color: '#ffffff', marginBottom: 2 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 800, color: '#ffffff', marginBottom: 2 }}>
           {corridor.name}
         </div>
-        <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 10 }}>
+        <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 9 }}>
           {simState.deadlockRerouteActive
-            ? `🔀 Bypass Active: ${simState.bypassName}`
+            ? `🔀 Live Traffic Diverted: ${simState.bypassName}`
             : `🏥 Dest: ${corridor.hospitalName || 'Bowring Hospital'} • Next: ${simState.activeJunctionName}`}
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
-          <div style={{ background: 'rgba(15,23,42,0.85)', padding: '7px 10px', borderRadius: 8, border: '1px solid #1e293b' }}>
-            <div style={{ fontSize: 9, color: '#64748b' }}>AMB SPEED</div>
-            <div style={{ fontSize: 16, fontWeight: 900, color: '#4ade80' }}>
-              {simState.ambulanceSpeedKmh} <span style={{ fontSize: 10, fontWeight: 400, color: '#94a3b8' }}>km/h</span>
+        {/* Live Traffic Feed Color Legend & Avg Flow Speed */}
+        <div
+          style={{
+            background: 'rgba(15, 23, 42, 0.92)',
+            border: '1px solid #1e293b',
+            borderRadius: 9,
+            padding: '7px 10px',
+            marginBottom: 9,
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+            <span style={{ fontSize: 9, color: '#cbd5e1', fontWeight: 800 }}>
+              🚦 LIVE TRAFFIC FEED ({simState.liveTrafficSource || 'BTP + OSRM'})
+            </span>
+            <span style={{ fontSize: 9.5, fontWeight: 900, color: '#4ade80' }}>
+              Avg: {simState.corridorAvgSpeedKmh || 32} km/h
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 8.5, color: '#cbd5e1' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: '#22c55e', display: 'inline-block' }} />
+              Free (&gt;40)
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: '#facc15', display: 'inline-block' }} />
+              Mod (22-39)
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: '#f97316', display: 'inline-block' }} />
+              Heavy (10-21)
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: '#ef4444', display: 'inline-block' }} />
+              Jam (&lt;10)
+            </span>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7, marginBottom: 9 }}>
+          <div style={{ background: 'rgba(15,23,42,0.85)', padding: '6px 9px', borderRadius: 8, border: '1px solid #1e293b' }}>
+            <div style={{ fontSize: 8.5, color: '#64748b' }}>AMB SPEED</div>
+            <div style={{ fontSize: 15, fontWeight: 900, color: '#4ade80' }}>
+              {simState.ambulanceSpeedKmh} <span style={{ fontSize: 9.5, fontWeight: 400, color: '#94a3b8' }}>km/h</span>
             </div>
           </div>
-          <div style={{ background: 'rgba(15,23,42,0.85)', padding: '7px 10px', borderRadius: 8, border: '1px solid #1e293b' }}>
-            <div style={{ fontSize: 9, color: '#64748b' }}>ROAD HEADING</div>
-            <div style={{ fontSize: 16, fontWeight: 900, color: '#38bdf8' }}>
-              {Math.round(simState.ambulanceBearing)}°
-            </div>
-          </div>
-          <div style={{ background: 'rgba(15,23,42,0.85)', padding: '7px 10px', borderRadius: 8, border: '1px solid #1e293b' }}>
-            <div style={{ fontSize: 9, color: '#64748b' }}>DIST TO SIGNAL</div>
-            <div style={{ fontSize: 16, fontWeight: 900, color: '#fbbf24' }}>
-              {simState.distanceToNextSignal} <span style={{ fontSize: 10, fontWeight: 400, color: '#94a3b8' }}>m</span>
-            </div>
-          </div>
-          <div style={{ background: 'rgba(15,23,42,0.85)', padding: '7px 10px', borderRadius: 8, border: '1px solid #1e293b' }}>
-            <div style={{ fontSize: 9, color: '#64748b' }}>JUNCTION ETA</div>
-            <div style={{ fontSize: 16, fontWeight: 900, color: '#f87171' }}>
-              {simState.etaToSignalSeconds} <span style={{ fontSize: 10, fontWeight: 400, color: '#94a3b8' }}>s</span>
+          <div style={{ background: 'rgba(15,23,42,0.85)', padding: '6px 9px', borderRadius: 8, border: '1px solid #1e293b' }}>
+            <div style={{ fontSize: 8.5, color: '#64748b' }}>DIST TO SIGNAL</div>
+            <div style={{ fontSize: 15, fontWeight: 900, color: '#fbbf24' }}>
+              {simState.distanceToNextSignal} <span style={{ fontSize: 9.5, fontWeight: 400, color: '#94a3b8' }}>m</span>
             </div>
           </div>
         </div>
@@ -804,11 +992,11 @@ export function MapboxSimulation({
             background: 'rgba(15,23,42,0.9)',
             border: '1px solid #1e293b',
             borderRadius: 9,
-            padding: '8px 10px',
+            padding: '7px 10px',
           }}
         >
-          <div style={{ fontSize: 9, color: '#94a3b8', fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>
-            MULTI-JUNCTION GREEN WAVE CASCADE
+          <div style={{ fontSize: 9, color: '#94a3b8', fontWeight: 700, letterSpacing: 1, marginBottom: 5 }}>
+            LIVE TRAFFIC SIGNAL PREEMPTION
           </div>
           {(simState.intersectionStates || []).map((node) => {
             const isGreen = node.status === 'GREEN_WAVE';
@@ -823,12 +1011,12 @@ export function MapboxSimulation({
               ? 'rgba(245,158,11,0.18)'
               : 'rgba(239,68,68,0.15)';
             const label = isGreen
-              ? '🟢 GREEN WAVE'
+              ? '🟢 FLUSHING GREEN'
               : isCleared
               ? '✓ CLEARED'
               : isBypass
-              ? '🔀 BYPASSED'
-              : '🔴 RED HOLD';
+              ? '🔀 JAM BYPASSED'
+              : '🔴 TRAFFIC QUEUE';
 
             return (
               <div
@@ -837,17 +1025,17 @@ export function MapboxSimulation({
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  fontSize: 10,
-                  padding: '3px 0',
+                  fontSize: 9.5,
+                  padding: '2.5px 0',
                 }}
               >
-                <span style={{ color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 175 }}>
+                <span style={{ color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 165 }}>
                   {node.name}
                 </span>
                 <span
                   style={{
                     fontWeight: 800,
-                    fontSize: 9,
+                    fontSize: 8.5,
                     padding: '1.5px 6px',
                     borderRadius: 4,
                     color: badgeCol,
@@ -862,18 +1050,18 @@ export function MapboxSimulation({
         </div>
       </div>
 
-      {/* ── Bottom-Center Floating Control Dock (Guaranteed No Overlap) ── */}
+      {/* ── Bottom-Center Floating Control Dock (Guaranteed No Overlap & No Auto-Zoom) ── */}
       <div
         style={{
           position: 'absolute',
-          bottom: 22,
+          bottom: 20,
           left: '50%',
           transform: 'translateX(-50%)',
           zIndex: 25,
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
-          background: 'rgba(2, 6, 23, 0.92)',
+          gap: 7,
+          background: 'rgba(2, 6, 23, 0.94)',
           border: '1px solid #334155',
           backdropFilter: 'blur(12px)',
           borderRadius: 16,
@@ -886,11 +1074,11 @@ export function MapboxSimulation({
         <button
           onClick={onDispatch}
           style={{
-            padding: '8px 16px',
+            padding: '8px 14px',
             borderRadius: 10,
             fontWeight: 900,
             fontSize: 11,
-            letterSpacing: 1,
+            letterSpacing: 0.8,
             background: '#22c55e',
             color: '#020617',
             border: 'none',
@@ -905,13 +1093,32 @@ export function MapboxSimulation({
           <span>DISPATCH [ENTER]</span>
         </button>
 
+        {onToggleTrafficIncident && (
+          <button
+            onClick={onToggleTrafficIncident}
+            style={{
+              padding: '8px 12px',
+              borderRadius: 10,
+              fontWeight: 800,
+              fontSize: 10.5,
+              background: simState.deadlockRerouteActive ? '#ef4444' : '#0f172a',
+              color: simState.deadlockRerouteActive ? '#ffffff' : '#fca5a5',
+              border: '1px solid #ef4444',
+              cursor: 'pointer',
+            }}
+            title="Inject severe live traffic jam on primary corridor to test automatic ambulance bypass rerouting"
+          >
+            {simState.deadlockRerouteActive ? '🟢 CLEAR TRAFFIC JAM' : '🔴 INJECT LIVE JAM'}
+          </button>
+        )}
+
         <button
           onClick={onToggleFreeze}
           style={{
-            padding: '8px 12px',
+            padding: '8px 11px',
             borderRadius: 10,
             fontWeight: 800,
-            fontSize: 11,
+            fontSize: 10.5,
             background: simState.isFrozen ? '#f59e0b' : '#0f172a',
             color: simState.isFrozen ? '#020617' : '#e2e8f0',
             border: '1px solid #334155',
@@ -931,16 +1138,20 @@ export function MapboxSimulation({
             gap: 3,
           }}
         >
-          {['CHASE', 'INTERSECTION', 'OVERVIEW', 'FREE'].map((m) => {
-            const active = cameraMode === m;
+          {[
+            { id: 'LOCKED', label: 'Locked 3D (No Zoom)' },
+            { id: 'FOLLOW', label: 'Pan Follow' },
+            { id: 'TOP_2D', label: '2D Top' },
+          ].map((m) => {
+            const active = cameraMode === m.id;
             return (
               <button
-                key={m}
-                onClick={() => handleCameraChange(m)}
+                key={m.id}
+                onClick={() => handleCameraChange(m.id)}
                 style={{
-                  padding: '5px 10px',
+                  padding: '5px 9px',
                   borderRadius: 7,
-                  fontSize: 11,
+                  fontSize: 10.5,
                   fontWeight: 700,
                   cursor: 'pointer',
                   background: active ? 'rgba(34, 197, 94, 0.2)' : 'transparent',
@@ -948,7 +1159,7 @@ export function MapboxSimulation({
                   border: active ? '1px solid rgba(34, 197, 94, 0.45)' : '1px solid transparent',
                 }}
               >
-                {m === 'CHASE' ? 'Chase' : m === 'INTERSECTION' ? 'Junction' : m === 'OVERVIEW' ? 'Corridor' : 'Orbit'}
+                {m.label}
               </button>
             );
           })}
@@ -963,15 +1174,16 @@ export function MapboxSimulation({
             border: '1px solid #334155',
             color: '#cbd5e1',
             cursor: 'pointer',
-            fontSize: 12,
+            fontSize: 11,
+            fontWeight: 700,
           }}
-          title="Switch 3D Vector / Satellite Map Layer"
+          title="Configure 3D Buildings, Live Traffic Layer & Map Style"
         >
-          🗺️ Layer
+          🗺️ Layers
         </button>
       </div>
 
-      {/* ── Map Style / Layer Selector Modal ── */}
+      {/* ── Map Style / 3D Buildings / Live Traffic Layer Modal ── */}
       {showSettings && (
         <div
           style={{
@@ -993,20 +1205,69 @@ export function MapboxSimulation({
               border: '1px solid #334155',
               borderRadius: 16,
               padding: 22,
-              maxWidth: 400,
+              maxWidth: 420,
               width: '100%',
               color: '#f1f5f9',
               boxShadow: '0 20px 50px rgba(0,0,0,0.9)',
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, borderBottom: '1px solid #1e293b', paddingBottom: 10 }}>
-              <span style={{ fontSize: 14, fontWeight: 800 }}>🗺️ Bengaluru Map Layer</span>
+              <span style={{ fontSize: 14, fontWeight: 800 }}>🗺️ Bengaluru 3D & Live Traffic Layers</span>
               <button
                 onClick={() => setShowSettings(false)}
                 style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 16, cursor: 'pointer' }}
               >
                 ✕
               </button>
+            </div>
+
+            {/* Toggles for 3D Extruded Buildings and Live Traffic Flow Overlay */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '9px 12px',
+                  background: '#020617',
+                  borderRadius: 10,
+                  border: '1px solid #1e293b',
+                  fontSize: 11.5,
+                  cursor: 'pointer',
+                }}
+              >
+                <span>🏢 3D Extruded Bengaluru Buildings</span>
+                <input
+                  type="checkbox"
+                  checked={show3DBuildings}
+                  onChange={(e) => setShow3DBuildings(e.target.checked)}
+                />
+              </label>
+
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '9px 12px',
+                  background: '#020617',
+                  borderRadius: 10,
+                  border: '1px solid #1e293b',
+                  fontSize: 11.5,
+                  cursor: 'pointer',
+                }}
+              >
+                <span>🚦 Live Traffic Congestion Feed (Red/Orange/Green)</span>
+                <input
+                  type="checkbox"
+                  checked={showLiveTrafficLayer}
+                  onChange={(e) => setShowLiveTrafficLayer(e.target.checked)}
+                />
+              </label>
+            </div>
+
+            <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 8, fontWeight: 700 }}>
+              BASEMAP STYLE (INSTANT-LOAD CDNs):
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
               {MAP_STYLES.map((style, idx) => (
@@ -1023,7 +1284,7 @@ export function MapboxSimulation({
                     border: selectedStyleIndex === idx ? '1.5px solid #22c55e' : '1px solid #1e293b',
                     background: selectedStyleIndex === idx ? 'rgba(34,197,94,0.12)' : '#020617',
                     color: selectedStyleIndex === idx ? '#4ade80' : '#cbd5e1',
-                    fontSize: 12,
+                    fontSize: 11.5,
                     fontWeight: 700,
                     cursor: 'pointer',
                     display: 'flex',
