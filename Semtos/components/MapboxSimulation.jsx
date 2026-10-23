@@ -128,50 +128,55 @@ function generateCorridor3DBuildingsGeoJson(routeCoords) {
   return { type: 'FeatureCollection', features };
 }
 
-// ── 3. Instant-Loading Multi-CDN Basemap Styles (Zero External Vector Failures) ──
-const BENGALURU_3D_DARK_STYLE = {
+// ── 3. 100% Free, Zero-API-Key Basemap Styles (Zero Watermarks & Zero Vector Failures) ──
+const ESRI_DARK_STYLE = {
   version: 8,
-  name: 'Bengaluru 3D Smart City + Live Traffic (Default)',
+  name: 'Bengaluru 3D Cyber Dark (Clean — No API Key)',
   sources: {
-    'carto-dark': {
+    'esri-dark-base': {
       type: 'raster',
       tiles: [
-        'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-        'https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
-        'https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png',
+        'https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+      ],
+      tileSize: 256,
+      maxzoom: 19,
+    },
+    'esri-dark-labels': {
+      type: 'raster',
+      tiles: [
+        'https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
       ],
       tileSize: 256,
       maxzoom: 19,
     },
   },
   layers: [
-    { id: 'carto-dark-layer', type: 'raster', source: 'carto-dark', minzoom: 0, maxzoom: 19 },
+    { id: 'esri-dark-base-layer', type: 'raster', source: 'esri-dark-base', minzoom: 0, maxzoom: 19 },
+    { id: 'esri-dark-labels-layer', type: 'raster', source: 'esri-dark-labels', minzoom: 0, maxzoom: 19 },
   ],
 };
 
-const BENGALURU_3D_COLOR_STREETS_STYLE = {
+const ESRI_STREETS_STYLE = {
   version: 8,
-  name: 'Bengaluru 3D Color Streets + Live Traffic',
+  name: 'Bengaluru 3D Color Streets (Clean — No API Key)',
   sources: {
-    'carto-voyager': {
+    'esri-streets': {
       type: 'raster',
       tiles: [
-        'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
-        'https://b.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
-        'https://c.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
+        'https://services.arcgisonline.com/arcgis/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
       ],
       tileSize: 256,
       maxzoom: 19,
     },
   },
   layers: [
-    { id: 'carto-voyager-layer', type: 'raster', source: 'carto-voyager', minzoom: 0, maxzoom: 19 },
+    { id: 'esri-streets-layer', type: 'raster', source: 'esri-streets', minzoom: 0, maxzoom: 19 },
   ],
 };
 
 const ESRI_SATELLITE_STYLE = {
   version: 8,
-  name: 'Bengaluru 3D Satellite Hybrid + Live Traffic',
+  name: 'Bengaluru 3D Satellite Hybrid (Clean — No API Key)',
   sources: {
     'esri-satellite': {
       type: 'raster',
@@ -196,21 +201,54 @@ const ESRI_SATELLITE_STYLE = {
   ],
 };
 
+const OSM_STREETS_STYLE = {
+  version: 8,
+  name: 'OpenStreetMap Standard (Clean — No API Key)',
+  sources: {
+    'osm-tiles': {
+      type: 'raster',
+      tiles: [
+        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      ],
+      tileSize: 256,
+      maxzoom: 19,
+    },
+  },
+  layers: [
+    { id: 'osm-tiles-layer', type: 'raster', source: 'osm-tiles', minzoom: 0, maxzoom: 19 },
+  ],
+};
+
 const MAP_STYLES = [
   {
-    id: 'blr-3d-dark',
-    name: 'Bengaluru 3D Smart City + Live Traffic (Default)',
-    style: BENGALURU_3D_DARK_STYLE,
+    id: 'esri-dark',
+    name: 'Bengaluru 3D Cyber Dark (Default — 0 API Key)',
+    description: 'Clean dark twin, 0 API keys required, zero watermarks',
+    style: ESRI_DARK_STYLE,
   },
   {
-    id: 'blr-3d-color',
-    name: 'Bengaluru 3D Color Streets + Live Traffic',
-    style: BENGALURU_3D_COLOR_STREETS_STYLE,
+    id: 'esri-streets',
+    name: 'Bengaluru 3D Color Streets (0 API Key)',
+    description: 'Crisp daytime street map, 0 API keys required',
+    style: ESRI_STREETS_STYLE,
   },
   {
     id: 'esri-satellite',
-    name: 'Bengaluru 3D Satellite Hybrid + Live Traffic',
+    name: 'Bengaluru 3D Satellite Hybrid (0 API Key)',
+    description: 'Photorealistic satellite imagery, 0 API keys required',
     style: ESRI_SATELLITE_STYLE,
+  },
+  {
+    id: 'osm-streets',
+    name: 'OpenStreetMap Streets (0 API Key)',
+    description: 'Global community street tiles, 0 API keys required',
+    style: OSM_STREETS_STYLE,
+  },
+  {
+    id: 'carto-dark',
+    name: 'CARTO Dark Matter (Requires CARTO Key)',
+    description: 'Requires personal key from carto.com/basemaps/apikey',
+    requiresCartoKey: true,
   },
 ];
 
@@ -231,7 +269,46 @@ export function MapboxSimulation({
 
   // DEFAULT IS 'LOCKED' (Static Corridor View) so the map NEVER zooms in or reloads tiles when simulation starts!
   const [cameraMode, setCameraMode] = useState('LOCKED');
-  const [selectedStyleIndex, setSelectedStyleIndex] = useState(0);
+  const [selectedStyleIndex, setSelectedStyleIndex] = useState(() => {
+    if (typeof window === 'undefined') return 0;
+    try {
+      const saved = localStorage.getItem('semtos_map_style_index');
+      if (saved !== null) {
+        const parsed = parseInt(saved, 10);
+        if (!isNaN(parsed) && parsed >= 0 && parsed < MAP_STYLES.length) {
+          return parsed;
+        }
+      }
+    } catch (_) {}
+    return 0; // Default to Esri Cyber Dark (Clean — 0 API Key Required)
+  });
+  const [cartoApiKey, setCartoApiKey] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    try {
+      return localStorage.getItem('semtos_carto_key') || process.env.NEXT_PUBLIC_CARTO_KEY || '';
+    } catch (_) {
+      return '';
+    }
+  });
+
+  const handleSelectStyle = (idx) => {
+    setSelectedStyleIndex(idx);
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('semtos_map_style_index', String(idx));
+      }
+    } catch (_) {}
+  };
+
+  const handleSaveCartoKey = (val) => {
+    setCartoApiKey(val);
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('semtos_carto_key', val);
+      }
+    } catch (_) {}
+  };
+
   const [show3DBuildings, setShow3DBuildings] = useState(true);
   const [showLiveTrafficLayer, setShowLiveTrafficLayer] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
@@ -267,6 +344,28 @@ export function MapboxSimulation({
         mapLibRef.current = maplibregl;
 
         const styleObj = MAP_STYLES[selectedStyleIndex] || MAP_STYLES[0];
+        let mapStyle = styleObj.style;
+
+        if (styleObj.requiresCartoKey) {
+          const keyParam = cartoApiKey ? `?key=${cartoApiKey.trim()}` : '';
+          mapStyle = {
+            version: 8,
+            name: 'CARTO Dark Matter',
+            sources: {
+              'carto-dark': {
+                type: 'raster',
+                tiles: [
+                  `https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png${keyParam}`,
+                  `https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png${keyParam}`,
+                  `https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png${keyParam}`,
+                ],
+                tileSize: 256,
+                maxzoom: 19,
+              },
+            },
+            layers: [{ id: 'carto-dark-layer', type: 'raster', source: 'carto-dark', minzoom: 0, maxzoom: 19 }],
+          };
+        }
 
         if (mapRef.current) {
           try { mapRef.current.remove(); } catch (_) {}
@@ -275,7 +374,7 @@ export function MapboxSimulation({
 
         const map = new maplibregl.Map({
           container: mapContainerRef.current,
-          style: styleObj.style,
+          style: mapStyle,
           center: corridor.center,
           zoom: corridor.zoom || 15.6,
           pitch: corridor.pitch || 52,
@@ -519,7 +618,7 @@ export function MapboxSimulation({
         mapRef.current = null;
       }
     };
-  }, [corridor.id, selectedStyleIndex]);
+  }, [corridor.id, selectedStyleIndex, cartoApiKey]);
 
   // ---- Dynamically Update Road-Snapped Polyline & 3D Buildings When OSRM Finishes ----
   useEffect(() => {
@@ -1267,19 +1366,19 @@ export function MapboxSimulation({
             </div>
 
             <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 8, fontWeight: 700 }}>
-              BASEMAP STYLE (INSTANT-LOAD CDNs):
+              BASEMAP STYLE (ZERO API KEY REQUIRED):
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
               {MAP_STYLES.map((style, idx) => (
                 <button
                   key={style.id}
                   onClick={() => {
-                    setSelectedStyleIndex(idx);
+                    handleSelectStyle(idx);
                     setShowSettings(false);
                   }}
                   style={{
                     textAlign: 'left',
-                    padding: '10px 12px',
+                    padding: '9px 12px',
                     borderRadius: 10,
                     border: selectedStyleIndex === idx ? '1.5px solid #22c55e' : '1px solid #1e293b',
                     background: selectedStyleIndex === idx ? 'rgba(34,197,94,0.12)' : '#020617',
@@ -1288,13 +1387,47 @@ export function MapboxSimulation({
                     fontWeight: 700,
                     cursor: 'pointer',
                     display: 'flex',
-                    justifyContent: 'space-between',
+                    flexDirection: 'column',
+                    gap: 3,
                   }}
                 >
-                  <span>{style.name}</span>
-                  {selectedStyleIndex === idx && <span>✓</span>}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                    <span>{style.name}</span>
+                    {selectedStyleIndex === idx && <span style={{ color: '#22c55e', fontWeight: 900 }}>✓</span>}
+                  </div>
+                  <div style={{ fontSize: 9.5, color: '#64748b', fontWeight: 400 }}>
+                    {style.description}
+                  </div>
                 </button>
               ))}
+            </div>
+
+            {/* Optional CARTO Key Config */}
+            <div style={{ padding: '10px 12px', background: '#020617', borderRadius: 10, border: '1px solid #1e293b', marginBottom: 14 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', marginBottom: 4 }}>
+                CARTO API KEY (OPTIONAL FOR CARTO TILES)
+              </div>
+              <input
+                type="text"
+                value={cartoApiKey}
+                onChange={(e) => handleSaveCartoKey(e.target.value)}
+                placeholder="carto.com/basemaps/apikey (Optional)"
+                style={{
+                  width: '100%',
+                  background: '#0b1329',
+                  border: '1px solid #334155',
+                  borderRadius: 6,
+                  padding: '6px 8px',
+                  fontSize: 11,
+                  color: '#f8fafc',
+                  fontFamily: 'monospace',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+              />
+              <div style={{ fontSize: 9, color: '#64748b', marginTop: 4 }}>
+                Default Esri & OSM basemaps require 0 API keys and have zero watermarks.
+              </div>
             </div>
             <button
               onClick={() => setShowSettings(false)}
