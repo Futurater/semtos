@@ -133,7 +133,7 @@ const ESRI_DARK_STYLE = {
         'https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
       ],
       tileSize: 256,
-      maxzoom: 19,
+      maxzoom: 16,
     },
     'esri-dark-labels': {
       type: 'raster',
@@ -141,12 +141,12 @@ const ESRI_DARK_STYLE = {
         'https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
       ],
       tileSize: 256,
-      maxzoom: 19,
+      maxzoom: 16,
     },
   },
   layers: [
-    { id: 'esri-dark-base-layer', type: 'raster', source: 'esri-dark-base', minzoom: 0, maxzoom: 19 },
-    { id: 'esri-dark-labels-layer', type: 'raster', source: 'esri-dark-labels', minzoom: 0, maxzoom: 19 },
+    { id: 'esri-dark-base-layer', type: 'raster', source: 'esri-dark-base', minzoom: 0, maxzoom: 22 },
+    { id: 'esri-dark-labels-layer', type: 'raster', source: 'esri-dark-labels', minzoom: 0, maxzoom: 22 },
   ],
 };
 
