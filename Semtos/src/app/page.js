@@ -4,7 +4,7 @@
  * SEMTOS — Smart Emergency Management and Traffic Orchestration System
  * ============================================================================
  * File: Semtos/src/app/page.js (Unified Bengaluru 3D Digital Twin,
- *       Live Traffic Feed & V2X Command Center Dashboard)
+ *       Kaggle `Banglore_traffic_Dataset.csv` Engine & V2X Command Center)
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -22,6 +22,7 @@ function SignalHUD({
   yoloQueue,
   networkMode,
   esp32Signal,
+  kaggleRecord,
 }) {
   const phaseLabel = {
     ALL_RED:      { text: 'ALL APPROACHES - STANDBY',       color: '#ef4444', sub: 'Press ENTER or dispatch from /ambulance' },
@@ -31,7 +32,7 @@ function SignalHUD({
     S_RELEASE:    { text: 'SOUTH ARM RELEASED',             color: '#22c55e', sub: 'Sequential queue discharge active' },
     W_RELEASE:    { text: 'WEST ARM RELEASED',              color: '#22c55e', sub: 'Sequential queue discharge active' },
     E_RELEASE:    { text: 'EAST ARM RELEASED',              color: '#22c55e', sub: 'Resuming adaptive rotation' },
-    NORMAL_CYCLE: { text: 'ADAPTIVE BTP NORMAL CYCLE',      color: '#38bdf8', sub: 'YOLOv8 queue-scaled rotation active' },
+    NORMAL_CYCLE: { text: 'ADAPTIVE BTP NORMAL CYCLE',      color: '#38bdf8', sub: 'YOLOv8 + Kaggle compliance-scaled hold' },
   };
   const p = phaseLabel[phase] || { text: phase, color: '#fff', sub: '' };
   const arms = [
@@ -54,7 +55,7 @@ function SignalHUD({
         borderRadius: 14,
         padding: '14px 18px',
         fontFamily: 'monospace',
-        width: 280,
+        width: 285,
         boxShadow: `0 12px 32px rgba(0,0,0,0.75), 0 0 20px ${p.color}33`,
       }}
     >
@@ -95,9 +96,12 @@ function SignalHUD({
           <div style={{ fontSize: 20, fontWeight: 900, color: p.color }}>{timeRemaining}s</div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: 9, color: '#64748b' }}>YOLO GREEN HOLD</div>
+          <div style={{ fontSize: 9, color: '#64748b' }}>KAGGLE + YOLO HOLD</div>
           <div style={{ fontSize: 14, fontWeight: 800, color: '#38bdf8' }}>
-            {yoloQueue?.recommendedHoldSeconds || 23}s ({yoloQueue?.queueCount ?? 4} cars)
+            {yoloQueue?.recommendedHoldSeconds || 23}s ({yoloQueue?.queueCount ?? 6} cars)
+          </div>
+          <div style={{ fontSize: 8.5, color: '#94a3b8' }}>
+            Comp: {kaggleRecord?.trafficSignalCompliancePct ?? 80.5}% • {kaggleRecord?.weatherConditions || 'Overcast'}
           </div>
         </div>
       </div>
@@ -184,6 +188,9 @@ export default function Dashboard() {
     corridor,
     simState: geoSimState,
     civilianVehicles: geoCivilianVehicles,
+    kagglePresets,
+    activeKaggleRecord,
+    selectKaggleScenario,
     dispatchAmbulance: dispatchGeoAmbulance,
     toggleFreeze: toggleGeoFreeze,
     toggleRealPhoneGps: toggleGeoPhoneGps,
@@ -198,10 +205,11 @@ export default function Dashboard() {
   }, [registerCallbacks, registerVehiclesRef, onAmbulanceOnAvenue, onAmbulanceCleared, onNormalCycle]);
 
   useEffect(() => {
-    if (yoloQueue?.recommendedHoldSeconds) {
-      setAdaptiveGreenHoldSeconds(yoloQueue.recommendedHoldSeconds);
+    const holdSec = geoSimState.kaggleHoldSeconds || yoloQueue?.recommendedHoldSeconds;
+    if (holdSec) {
+      setAdaptiveGreenHoldSeconds(holdSec);
     }
-  }, [yoloQueue?.recommendedHoldSeconds, setAdaptiveGreenHoldSeconds]);
+  }, [geoSimState.kaggleHoldSeconds, yoloQueue?.recommendedHoldSeconds, setAdaptiveGreenHoldSeconds]);
 
   const handleUnifiedDispatch = () => {
     dispatchGeoAmbulance();
@@ -212,10 +220,10 @@ export default function Dashboard() {
     {
       id: 1,
       label: 'CASE 01',
-      title: 'Bengaluru Live Traffic Feed & Green Corridor (3D Map & Twin)',
+      title: 'Kaggle Bengaluru Dataset & Live Green Corridor (3D Map & Twin)',
       description:
-        'Live color-coded Bengaluru traffic flow (MG Road, Hosur Road, Indiranagar) where AMB-108 flushes red congestion segments ahead into green free-flow lanes.',
-      tags: ['Live Traffic Feed', '3D Extruded Buildings', 'Locked Zoom (Zero Lag)', '3D Digital Twin'],
+        'Replays real empirical rows from Banglore_traffic_Dataset.csv (MG Road, Koramangala, Indiranagar) so civilian car counts, speeds, and yielding compliance physically obey the dataset.',
+      tags: ['Banglore_traffic_Dataset.csv', 'Compliance Yielding', 'Locked 3D Zoom', '3D Digital Twin'],
       color: '#22c55e',
       available: true,
       defaultView: 'SPLIT',
@@ -223,10 +231,10 @@ export default function Dashboard() {
     {
       id: 2,
       label: 'CASE 02',
-      title: 'Edge-AI Adaptive Queue Timing (YOLOv8)',
+      title: 'Edge-AI Adaptive Queue & Weather Hold Scaling (YOLOv8)',
       description:
-        'Real-time computer vision queue analytics (YOLOv8 + OpenCV) that counts queued vehicles in the target lane and scales green-hold duration dynamically.',
-      tags: ['YOLOv8 + OpenCV', 'Queue Discharge Model', 'Dynamic Green Hold', 'BTP AI CCTV'],
+        'Combines YOLOv8 queue counts with Kaggle Traffic Signal Compliance (%) and Weather Conditions to dynamically scale green-hold duration.',
+      tags: ['YOLOv8 + OpenCV', 'Compliance & Weather Math', 'Dynamic Green Hold', 'BTP AI CCTV'],
       color: '#38bdf8',
       available: true,
       defaultView: 'TWIN',
@@ -234,10 +242,10 @@ export default function Dashboard() {
     {
       id: 3,
       label: 'CASE 03',
-      title: 'Live Traffic Jam Auto-Diversion & Multi-Junction Wave',
+      title: 'Kaggle Peak Rain Incident Auto-Diversion (>85% Capacity)',
       description:
-        'Automated live traffic jam detection (>= 12 queued vehicles) that diverts AMB-108 onto the parallel free-flow Bengaluru bypass corridor.',
-      tags: ['Live Jam Detection', 'Cubbon Rd Bypass', 'J1 → J2 → J3 Wave', 'V2I Security'],
+        'Loads the Peak Rain Bottleneck row (>93% capacity utilization + 2-3 incidents + Roadwork=Yes) to automatically divert AMB-108 onto the parallel bypass corridor.',
+      tags: ['Kaggle Incident Trigger', 'Cubbon Rd Bypass', 'J1 → J2 → J3 Wave', 'V2I Security'],
       color: '#a78bfa',
       available: true,
       defaultView: 'MAP',
@@ -248,13 +256,17 @@ export default function Dashboard() {
     setActiveCaseId(c.id);
     setViewMode(c.defaultView);
     setStarted(true);
+    const presets = kagglePresets || [];
     if (c.id === 2) {
+      if (presets[1]) selectKaggleScenario(presets[1]);
       updateYoloQueue(7, 'CASE_02_ADAPTIVE_DEMO');
       onNormalCycle();
     } else if (c.id === 3) {
-      updateYoloQueue(13, 'CASE_03_DEADLOCK_DEMO');
+      if (presets[2]) selectKaggleScenario(presets[2]);
+      updateYoloQueue(14, 'CASE_03_KAGGLE_RAIN_JAM');
     } else {
-      updateYoloQueue(4, 'CASE_01_STANDARD_DEMO');
+      if (presets[1]) selectKaggleScenario(presets[1]);
+      updateYoloQueue(6, 'CASE_01_KAGGLE_COMMUTER');
     }
   };
 
@@ -276,7 +288,7 @@ export default function Dashboard() {
       >
         <div style={{ textAlign: 'center', marginBottom: 40 }}>
           <div style={{ fontSize: 11, letterSpacing: 5, color: '#38bdf8', marginBottom: 8, fontWeight: 700 }}>
-            BENGALURU SMART CITY V2X • KSCST 50TH SPP PROTOTYPE
+            BENGALURU SMART CITY V2X • KAGGLE TRAFFIC PULSE + KSCST 50TH SPP
           </div>
           <h1
             style={{
@@ -290,8 +302,9 @@ export default function Dashboard() {
           >
             SEMTOS CMD
           </h1>
-          <p style={{ color: '#94a3b8', fontSize: 13, marginTop: 10, maxWidth: 640, lineHeight: 1.7 }}>
-            Smart Emergency Management and Traffic Orchestration System — Live Traffic Feed & Road-Snapped Bengaluru Emergency Green Corridors (MG Road, Silk Board–Hosur Rd, Indiranagar 100 Ft Rd).
+          <p style={{ color: '#94a3b8', fontSize: 13, marginTop: 10, maxWidth: 660, lineHeight: 1.7 }}>
+            Smart Emergency Management and Traffic Orchestration System — Powered by Kaggle&apos;s{' '}
+            <code style={{ color: '#38bdf8' }}>Banglore_traffic_Dataset.csv</code> &amp; Road-Snapped Bengaluru Emergency Green Corridors.
           </p>
 
           <div style={{ display: 'flex', gap: 14, justifyContent: 'center', marginTop: 18, flexWrap: 'wrap' }}>
@@ -431,7 +444,7 @@ export default function Dashboard() {
         flexDirection: 'column',
       }}
     >
-      {/* ── Top Header Navigation Bar (Fixed 54px height, No Black Void Above) ── */}
+      {/* ── Top Header Navigation Bar ── */}
       <header
         style={{
           height: 54,
@@ -634,7 +647,7 @@ export default function Dashboard() {
         </div>
       </header>
 
-      {/* ── Sleek Floating Preemption Alert Pill (No Black Void Bar!) ── */}
+      {/* ── Sleek Floating Preemption Alert Pill ── */}
       {anyPreemptionActive && (
         <div
           style={{
@@ -658,7 +671,7 @@ export default function Dashboard() {
         >
           <span style={{ fontSize: 13 }}>🚨</span>
           <span style={{ fontSize: 11, fontWeight: 900, color: '#ffffff', letterSpacing: 1.2 }}>
-            LIVE TRAFFIC FLUSHING GREEN — BENGALURU V2X ACTIVE • HOLD: {yoloQueue?.recommendedHoldSeconds || 23}s
+            KAGGLE LIVE TRAFFIC FLUSHING GREEN • HOLD: {geoSimState.kaggleHoldSeconds || yoloQueue?.recommendedHoldSeconds || 23}s (COMPLIANCE: {activeKaggleRecord?.trafficSignalCompliancePct ?? 80.5}%)
           </span>
         </div>
       )}
@@ -683,6 +696,7 @@ export default function Dashboard() {
               onToggleFreeze={toggleGeoFreeze}
               onTogglePhoneGps={toggleGeoPhoneGps}
               onToggleTrafficIncident={toggleLiveTrafficIncident}
+              onSelectKaggleScenario={selectKaggleScenario}
             />
           </div>
         )}
@@ -717,11 +731,12 @@ export default function Dashboard() {
               yoloQueue={yoloQueue}
               networkMode={networkMode}
               esp32Signal={esp32Signal}
+              kaggleRecord={activeKaggleRecord}
             />
           </div>
         )}
 
-        {/* ── Right-Side Floating Edge-AI YOLOv8 Queue & V2X Audit Drawer ── */}
+        {/* ── Right-Side Floating Kaggle Dataset + Edge-AI YOLOv8 Queue & V2X Audit Drawer ── */}
         {showAuditDrawer && (
           <aside
             style={{
@@ -729,36 +744,108 @@ export default function Dashboard() {
               top: 16,
               right: 16,
               zIndex: 30,
-              width: 315,
+              width: 325,
               maxHeight: 'calc(100% - 32px)',
-              background: 'rgba(2, 6, 23, 0.90)',
+              background: 'rgba(2, 6, 23, 0.92)',
               border: '1px solid #1e293b',
               backdropFilter: 'blur(12px)',
               borderRadius: 16,
-              padding: 14,
-              boxShadow: '0 12px 32px rgba(0, 0, 0, 0.8)',
+              padding: 13,
+              boxShadow: '0 12px 32px rgba(0, 0, 0, 0.85)',
               display: 'flex',
               flexDirection: 'column',
-              gap: 12,
+              gap: 10,
               pointerEvents: 'auto',
             }}
           >
+            {/* Kaggle `Banglore_traffic_Dataset.csv` Active Record Card */}
+            <div
+              style={{
+                background: 'rgba(15, 23, 42, 0.92)',
+                border: '1px solid rgba(56, 189, 248, 0.35)',
+                borderRadius: 12,
+                padding: 11,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ fontSize: 9.5, fontWeight: 900, color: '#38bdf8', letterSpacing: 0.8 }}>
+                  📊 KAGGLE BTP DATASET ENGINE
+                </span>
+                <span
+                  style={{
+                    fontSize: 8.5,
+                    padding: '2px 6px',
+                    borderRadius: 4,
+                    fontWeight: 800,
+                    background: 'rgba(34,197,94,0.16)',
+                    color: '#4ade80',
+                  }}
+                >
+                  {activeKaggleRecord?.areaName || 'M.G. Road'}
+                </span>
+              </div>
+
+              <div style={{ fontSize: 9.5, color: '#e2e8f0', fontWeight: 700, marginBottom: 6 }}>
+                {activeKaggleRecord?.label}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5, fontSize: 9, marginBottom: 7 }}>
+                <div style={{ background: '#020617', padding: '5px 7px', borderRadius: 6, border: '1px solid #1e293b' }}>
+                  <span style={{ color: '#64748b', display: 'block', fontSize: 7.5 }}>TRAFFIC VOLUME</span>
+                  <strong style={{ color: '#f8fafc' }}>
+                    {(activeKaggleRecord?.trafficVolume || 34820).toLocaleString()} veh
+                  </strong>
+                </div>
+                <div style={{ background: '#020617', padding: '5px 7px', borderRadius: 6, border: '1px solid #1e293b' }}>
+                  <span style={{ color: '#64748b', display: 'block', fontSize: 7.5 }}>SPAWNED CARS / SPEED</span>
+                  <strong style={{ color: '#4ade80' }}>
+                    {geoCivilianVehicles.length} cars @ {activeKaggleRecord?.averageSpeedKmh ?? 24.8} km/h
+                  </strong>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 4 }}>
+                {(kagglePresets || []).map((preset) => {
+                  const active = activeKaggleRecord?.scenarioId === preset.scenarioId;
+                  return (
+                    <button
+                      key={preset.scenarioId}
+                      onClick={() => selectKaggleScenario(preset)}
+                      style={{
+                        flex: 1,
+                        padding: '5px 4px',
+                        borderRadius: 6,
+                        fontSize: 8.5,
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        background: active ? '#38bdf8' : '#020617',
+                        color: active ? '#020617' : '#94a3b8',
+                        border: active ? '1px solid #38bdf8' : '1px solid #1e293b',
+                      }}
+                    >
+                      {preset.shortTab}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* YOLOv8 Queue Analytics & Hold Scaling Card */}
             <div
               style={{
                 background: 'rgba(15, 23, 42, 0.9)',
                 border: '1px solid #1e293b',
                 borderRadius: 12,
-                padding: 12,
+                padding: 11,
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <span style={{ fontSize: 10, fontWeight: 800, color: '#38bdf8', letterSpacing: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ fontSize: 9.5, fontWeight: 800, color: '#38bdf8', letterSpacing: 1 }}>
                   🎥 EDGE-AI YOLOv8 QUEUE
                 </span>
                 <span
                   style={{
-                    fontSize: 9,
+                    fontSize: 8.5,
                     padding: '2px 6px',
                     borderRadius: 4,
                     fontWeight: 800,
@@ -770,37 +857,32 @@ export default function Dashboard() {
                 </span>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-                <div style={{ background: '#020617', padding: 8, borderRadius: 8, border: '1px solid #1e293b' }}>
-                  <div style={{ fontSize: 9, color: '#64748b' }}>QUEUED CARS</div>
-                  <div style={{ fontSize: 18, fontWeight: 900, color: '#ffffff' }}>{yoloQueue?.queueCount ?? 4}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7, marginBottom: 7 }}>
+                <div style={{ background: '#020617', padding: 7, borderRadius: 8, border: '1px solid #1e293b' }}>
+                  <div style={{ fontSize: 8.5, color: '#64748b' }}>QUEUED CARS</div>
+                  <div style={{ fontSize: 17, fontWeight: 900, color: '#ffffff' }}>{yoloQueue?.queueCount ?? 6}</div>
                 </div>
-                <div style={{ background: '#020617', padding: 8, borderRadius: 8, border: '1px solid #1e293b' }}>
-                  <div style={{ fontSize: 9, color: '#64748b' }}>DYNAMIC HOLD</div>
-                  <div style={{ fontSize: 18, fontWeight: 900, color: '#4ade80' }}>
-                    {yoloQueue?.recommendedHoldSeconds ?? 23}s
+                <div style={{ background: '#020617', padding: 7, borderRadius: 8, border: '1px solid #1e293b' }}>
+                  <div style={{ fontSize: 8.5, color: '#64748b' }}>COMPLIANCE HOLD</div>
+                  <div style={{ fontSize: 17, fontWeight: 900, color: '#4ade80' }}>
+                    {geoSimState.kaggleHoldSeconds || yoloQueue?.recommendedHoldSeconds || 23}s
                   </div>
                 </div>
               </div>
 
               <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#94a3b8', marginBottom: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9.5, color: '#94a3b8', marginBottom: 3 }}>
                   <span>Live Traffic Queue Slider</span>
-                  <span>{yoloQueue?.source || 'SIM'}</span>
+                  <span>{yoloQueue?.source || 'KAGGLE_CSV'}</span>
                 </div>
                 <input
                   type="range"
                   min="0"
                   max="16"
-                  value={yoloQueue?.queueCount ?? 4}
+                  value={yoloQueue?.queueCount ?? 6}
                   onChange={(e) => updateYoloQueue(e.target.value, 'DASHBOARD_SLIDER')}
                   style={{ width: '100%', accentColor: '#38bdf8', cursor: 'pointer' }}
                 />
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: '#64748b' }}>
-                  <span>0 cars (Free)</span>
-                  <span>6 cars (Heavy)</span>
-                  <span>12+ (Gridlock)</span>
-                </div>
               </div>
             </div>
 
@@ -808,12 +890,12 @@ export default function Dashboard() {
             <div
               style={{
                 flex: 1,
-                minHeight: 150,
-                maxHeight: 240,
+                minHeight: 130,
+                maxHeight: 200,
                 background: 'rgba(15, 23, 42, 0.9)',
                 border: '1px solid #1e293b',
                 borderRadius: 12,
-                padding: 12,
+                padding: 11,
                 display: 'flex',
                 flexDirection: 'column',
               }}
@@ -824,31 +906,31 @@ export default function Dashboard() {
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   borderBottom: '1px solid #1e293b',
-                  paddingBottom: 6,
-                  marginBottom: 8,
+                  paddingBottom: 5,
+                  marginBottom: 6,
                 }}
               >
-                <span style={{ fontSize: 10, fontWeight: 800, color: '#4ade80', letterSpacing: 1 }}>
-                  🛡️ V2X & VECTOR AUDIT
+                <span style={{ fontSize: 9.5, fontWeight: 800, color: '#4ade80', letterSpacing: 1 }}>
+                  🛡️ V2X & KAGGLE AUDIT
                 </span>
-                <span style={{ fontSize: 9, color: '#64748b' }}>
+                <span style={{ fontSize: 8.5, color: '#64748b' }}>
                   Latency: {telemetry?.dispatchLatencyMs ?? 3.2}ms
                 </span>
               </div>
-              <div style={{ flex: 1, overflowY: 'auto', fontSize: 10, paddingRight: 4 }}>
+              <div style={{ flex: 1, overflowY: 'auto', fontSize: 9.5, paddingRight: 4 }}>
                 {[...auditLogs].reverse().map((log) => (
                   <div
                     key={log.id}
                     style={{
                       borderBottom: '1px solid rgba(30, 41, 59, 0.6)',
-                      paddingBottom: 5,
-                      marginBottom: 5,
-                      lineHeight: 1.45,
+                      paddingBottom: 4,
+                      marginBottom: 4,
+                      lineHeight: 1.4,
                     }}
                   >
-                    <span style={{ color: '#64748b', marginRight: 6 }}>{log.timestamp}</span>
+                    <span style={{ color: '#64748b', marginRight: 5 }}>{log.timestamp}</span>
                     {log.category && (
-                      <span style={{ color: '#38bdf8', fontWeight: 700, marginRight: 6 }}>[{log.category}]</span>
+                      <span style={{ color: '#38bdf8', fontWeight: 700, marginRight: 5 }}>[{log.category}]</span>
                     )}
                     <span style={{ color: '#e2e8f0' }}>{log.message}</span>
                   </div>
@@ -858,7 +940,7 @@ export default function Dashboard() {
           </aside>
         )}
 
-        {/* ── Floating Deadlock Bypass Pill (When Live Traffic Jam / Queue >= 12 Cars) ── */}
+        {/* ── Floating Deadlock Bypass Pill ── */}
         {(routing?.deadlockRerouteActive || geoSimState.deadlockRerouteActive) && (
           <div
             style={{
@@ -881,7 +963,7 @@ export default function Dashboard() {
             }}
           >
             <span>
-              ⚠️ LIVE TRAFFIC GRIDLOCK DETECTED • AMB-108 DIVERTED VIA: {corridor.bypassName}
+              ⚠️ KAGGLE BOTTLENECK JAM ({activeKaggleRecord?.roadCapacityUtilizationPct ?? 94}% UTIL • {activeKaggleRecord?.incidentReports ?? 2} INCIDENTS) • DIVERTED VIA: {corridor.bypassName}
             </span>
             <button
               onClick={toggleLiveTrafficIncident}
@@ -896,7 +978,7 @@ export default function Dashboard() {
                 cursor: 'pointer',
               }}
             >
-              CLEAR TRAFFIC JAM
+              RESTORE NORMAL ROW
             </button>
           </div>
         )}

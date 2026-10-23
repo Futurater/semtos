@@ -38,8 +38,6 @@ function createGeoJsonCircle(center, radiusInMeters, points = 64) {
 }
 
 // ── 2. Procedural 3D Bengaluru Building Extrusion Generator ─────────────────
-// Guarantees 100% reliable 3D buildings (`fill-extrusion`) along both sides of
-// any Bengaluru corridor without relying on fragile external vector tile servers!
 function generateCorridor3DBuildingsGeoJson(routeCoords) {
   const features = [];
   if (!Array.isArray(routeCoords) || routeCoords.length < 2) {
@@ -56,7 +54,6 @@ function generateCorridor3DBuildingsGeoJson(routeCoords) {
     const segLen = Math.hypot(dx, dy);
     if (segLen < 0.00015) continue;
 
-    // Unit normal perpendicular to road segment
     const nx = -dy / segLen;
     const ny = dx / segLen;
     const tx = dx / segLen;
@@ -68,9 +65,7 @@ function generateCorridor3DBuildingsGeoJson(routeCoords) {
       const baseLon = lon1 + dx * frac;
       const baseLat = lat1 + dy * frac;
 
-      // Place 3D commercial/tech-park buildings on both Left (+1) and Right (-1) sides of the avenue
       [-1, 1].forEach((side, sideIdx) => {
-        // Row 1: Front avenue buildings (set back ~26m from road centerline so road is never covered)
         const setbackDeg = 0.00027 * side;
         const halfWidth = 0.00014 + ((i + s) % 3) * 0.00004;
         const halfDepth = 0.00012 + ((i + sideIdx) % 2) * 0.00005;
@@ -97,7 +92,6 @@ function generateCorridor3DBuildingsGeoJson(routeCoords) {
           },
         });
 
-        // Row 2: Secondary skyline block further back (~68m from road)
         const setback2 = 0.00066 * side;
         const cx2 = baseLon + nx * setback2;
         const cy2 = baseLat + ny * setback2;
@@ -259,6 +253,7 @@ export function MapboxSimulation({
   onDispatch,
   onToggleFreeze,
   onToggleTrafficIncident,
+  onSelectKaggleScenario,
 }) {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
@@ -267,7 +262,6 @@ export function MapboxSimulation({
   const signalMarkersRef = useRef([]);
   const civilianMarkersRef = useRef(new Map());
 
-  // DEFAULT IS 'LOCKED' (Static Corridor View) so the map NEVER zooms in or reloads tiles when simulation starts!
   const [cameraMode, setCameraMode] = useState('LOCKED');
   const [selectedStyleIndex, setSelectedStyleIndex] = useState(() => {
     if (typeof window === 'undefined') return 0;
@@ -280,7 +274,7 @@ export function MapboxSimulation({
         }
       }
     } catch (_) {}
-    return 0; // Default to Esri Cyber Dark (Clean — 0 API Key Required)
+    return 0;
   });
   const [cartoApiKey, setCartoApiKey] = useState(() => {
     if (typeof window === 'undefined') return '';
@@ -308,7 +302,6 @@ export function MapboxSimulation({
       }
     } catch (_) {}
   };
-
   const [show3DBuildings, setShow3DBuildings] = useState(true);
   const [showLiveTrafficLayer, setShowLiveTrafficLayer] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
@@ -387,7 +380,6 @@ export function MapboxSimulation({
           if (isCancelled) return;
           mapRef.current = map;
 
-          // Optional Live TomTom Traffic Raster Flow Tile Layer if user configures NEXT_PUBLIC_TOMTOM_KEY
           const tomtomKey =
             typeof process !== 'undefined' ? process.env?.NEXT_PUBLIC_TOMTOM_KEY : null;
           if (tomtomKey) {
@@ -408,7 +400,7 @@ export function MapboxSimulation({
             } catch (_) {}
           }
 
-          // 1. 3D Extruded Bengaluru Corridor Buildings (`fill-extrusion` — 100% reliable local GeoJSON!)
+          // 1. 3D Extruded Bengaluru Corridor Buildings
           try {
             const buildingsGeoJson = generateCorridor3DBuildingsGeoJson(corridor.route);
             map.addSource('blr-3d-buildings', {
@@ -455,7 +447,7 @@ export function MapboxSimulation({
             });
           } catch (_) {}
 
-          // 3. LIVE BENGALURU TRAFFIC FEED LAYER (Color-Coded Multi-Segment Traffic Congestion: Red/Orange/Yellow/Green)
+          // 3. LIVE BENGALURU TRAFFIC FEED LAYER
           try {
             const initialTrafficData = corridor.liveTrafficGeoJson || {
               type: 'FeatureCollection',
@@ -467,7 +459,6 @@ export function MapboxSimulation({
               data: initialTrafficData,
             });
 
-            // Outer Traffic Congestion Halo
             map.addLayer({
               id: 'live-traffic-glow',
               type: 'line',
@@ -486,7 +477,6 @@ export function MapboxSimulation({
               },
             });
 
-            // Core Live Traffic Flow Band (Green = Free Flow, Yellow = Moderate, Orange = Heavy, Red = Gridlock)
             map.addLayer({
               id: 'live-traffic-core',
               type: 'line',
@@ -504,7 +494,6 @@ export function MapboxSimulation({
               },
             });
 
-            // Center directional lane dashes on primary corridor
             map.addLayer({
               id: 'route-center-dashes',
               type: 'line',
@@ -620,7 +609,7 @@ export function MapboxSimulation({
     };
   }, [corridor.id, selectedStyleIndex, cartoApiKey]);
 
-  // ---- Dynamically Update Road-Snapped Polyline & 3D Buildings When OSRM Finishes ----
+  // ---- Dynamically Update Road-Snapped Polyline & 3D Buildings ----
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
@@ -712,7 +701,6 @@ export function MapboxSimulation({
       }
     } catch (_) {}
 
-    // Only pan gently if user explicitly clicked 'FOLLOW' mode — and NEVER change zoom or bearing!
     if (cameraMode === 'FOLLOW' && simState.isSimulationRunning && !simState.isFrozen) {
       try {
         map.panTo([lon, lat], { duration: 80, easing: (t) => t });
@@ -727,7 +715,7 @@ export function MapboxSimulation({
     mapLoaded,
   ]);
 
-  // ---- Ambulance 3D Volumetric Marker (Strictly Road-Aligned) ----
+  // ---- Ambulance 3D Volumetric Marker ----
   useEffect(() => {
     const map = mapRef.current;
     const maplibregl = mapLibRef.current;
@@ -838,7 +826,7 @@ export function MapboxSimulation({
     });
   }, [corridor, simState.intersectionStates, simState.signalPhase, mapLoaded]);
 
-  // ---- Moving Road-Aligned Civilian Vehicles with Yielding Pull-Over ----
+  // ---- Moving Road-Aligned Civilian Vehicles (With Kaggle Compliance Badges) ----
   useEffect(() => {
     const map = mapRef.current;
     const maplibregl = mapLibRef.current;
@@ -854,7 +842,12 @@ export function MapboxSimulation({
       }
     });
 
-    const bodyColors = ['#38bdf8', '#94a3b8', '#fbbf24', '#a78bfa', '#e2e8f0', '#60a5fa', '#cbd5e1', '#34d399'];
+    const bodyColors = [
+      '#38bdf8', '#94a3b8', '#fbbf24', '#a78bfa',
+      '#e2e8f0', '#60a5fa', '#cbd5e1', '#34d399',
+      '#f472b6', '#fb923c', '#2dd4bf', '#818cf8',
+      '#facc15', '#a3e635',
+    ];
 
     civilianVehicles.forEach((car, idx) => {
       let markerObj = markersMap.get(car.id);
@@ -902,7 +895,19 @@ export function MapboxSimulation({
 
         const carBadge = document.getElementById(`car-badge-${car.id}`);
         if (carBadge) {
-          carBadge.style.display = car.isYielding ? 'block' : 'none';
+          if (car.isYielding) {
+            carBadge.style.display = 'block';
+            carBadge.style.background = '#10b981';
+            carBadge.style.color = '#020617';
+            carBadge.innerText = `⬅ YIELD (${car.currentSpeedKmh}km/h)`;
+          } else if (car.isDelayedYield) {
+            carBadge.style.display = 'block';
+            carBadge.style.background = '#f59e0b';
+            carBadge.style.color = '#020617';
+            carBadge.innerText = '⚠️ SLOW YIELD';
+          } else {
+            carBadge.style.display = 'none';
+          }
         }
       } catch (_) {}
     });
@@ -914,20 +919,13 @@ export function MapboxSimulation({
     if (!map) return;
 
     if (mode === 'LOCKED') {
-      map.JumpTo
-        ? map.jumpTo({
-            center: corridor.center,
-            zoom: corridor.zoom || 15.6,
-            pitch: corridor.pitch || 52,
-            bearing: corridor.bearing || 284,
-          })
-        : map.easeTo({
-            center: corridor.center,
-            zoom: corridor.zoom || 15.6,
-            pitch: corridor.pitch || 52,
-            bearing: corridor.bearing || 284,
-            duration: 400,
-          });
+      map.easeTo({
+        center: corridor.center,
+        zoom: corridor.zoom || 15.6,
+        pitch: corridor.pitch || 52,
+        bearing: corridor.bearing || 284,
+        duration: 400,
+      });
     } else if (mode === 'TOP_2D') {
       map.easeTo({
         center: corridor.center,
@@ -938,6 +936,9 @@ export function MapboxSimulation({
       });
     }
   };
+
+  const kaggleRec = simState.kaggleRecord || corridor.activeKaggleRecord || {};
+  const kagglePresets = corridor.kagglePresets || [];
 
   return (
     <div
@@ -966,20 +967,20 @@ export function MapboxSimulation({
         }}
       />
 
-      {/* ── Top-Left Bengaluru Live Traffic & Green Wave HUD Card ── */}
+      {/* ── Top-Left Bengaluru Live Traffic, Kaggle Dataset & Green Wave HUD Card ── */}
       <div
         style={{
           position: 'absolute',
-          top: 16,
-          left: 16,
+          top: 14,
+          left: 14,
           zIndex: 20,
-          width: 325,
-          background: 'rgba(2, 6, 23, 0.92)',
+          width: 345,
+          background: 'rgba(2, 6, 23, 0.93)',
           border: '1px solid rgba(34, 197, 94, 0.45)',
           backdropFilter: 'blur(12px)',
           borderRadius: 14,
-          padding: '13px 15px',
-          boxShadow: '0 12px 32px rgba(0, 0, 0, 0.78)',
+          padding: '12px 14px',
+          boxShadow: '0 12px 32px rgba(0, 0, 0, 0.80)',
           color: '#f1f5f9',
           pointerEvents: 'auto',
         }}
@@ -990,11 +991,11 @@ export function MapboxSimulation({
             alignItems: 'center',
             justifyContent: 'space-between',
             borderBottom: '1px solid #1e293b',
-            paddingBottom: 7,
-            marginBottom: 8,
+            paddingBottom: 6,
+            marginBottom: 7,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span
               style={{
                 width: 8,
@@ -1004,13 +1005,13 @@ export function MapboxSimulation({
                 boxShadow: '0 0 8px #22c55e',
               }}
             />
-            <span style={{ fontSize: 10, letterSpacing: 1.2, color: '#4ade80', fontWeight: 800 }}>
-              BTP LIVE TRAFFIC & V2X CORRIDOR
+            <span style={{ fontSize: 9.5, letterSpacing: 1.1, color: '#4ade80', fontWeight: 800 }}>
+              KAGGLE BTP DATASET + LIVE V2X
             </span>
           </div>
           <span
             style={{
-              fontSize: 9,
+              fontSize: 8.5,
               padding: '2px 6px',
               borderRadius: 4,
               background: '#0f172a',
@@ -1019,68 +1020,109 @@ export function MapboxSimulation({
               fontWeight: 700,
             }}
           >
-            LOCKED ZOOM (NO LAG)
+            {civilianVehicles.length} ACTIVE CARS
           </span>
         </div>
 
-        <div style={{ fontSize: 12.5, fontWeight: 800, color: '#ffffff', marginBottom: 2 }}>
+        <div style={{ fontSize: 12, fontWeight: 800, color: '#ffffff', marginBottom: 2 }}>
           {corridor.name}
         </div>
-        <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 9 }}>
+        <div style={{ fontSize: 9.5, color: '#94a3b8', marginBottom: 8 }}>
           {simState.deadlockRerouteActive
-            ? `🔀 Live Traffic Diverted: ${simState.bypassName}`
+            ? `🔀 Diverted: ${simState.bypassName}`
             : `🏥 Dest: ${corridor.hospitalName || 'Bowring Hospital'} • Next: ${simState.activeJunctionName}`}
         </div>
 
-        {/* Live Traffic Feed Color Legend & Avg Flow Speed */}
-        <div
-          style={{
-            background: 'rgba(15, 23, 42, 0.92)',
-            border: '1px solid #1e293b',
-            borderRadius: 9,
-            padding: '7px 10px',
-            marginBottom: 9,
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
-            <span style={{ fontSize: 9, color: '#cbd5e1', fontWeight: 800 }}>
-              🚦 LIVE TRAFFIC FEED ({simState.liveTrafficSource || 'BTP + OSRM'})
-            </span>
-            <span style={{ fontSize: 9.5, fontWeight: 900, color: '#4ade80' }}>
-              Avg: {simState.corridorAvgSpeedKmh || 32} km/h
-            </span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 8.5, color: '#cbd5e1' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ width: 8, height: 8, borderRadius: 2, background: '#22c55e', display: 'inline-block' }} />
-              Free (&gt;40)
-            </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ width: 8, height: 8, borderRadius: 2, background: '#facc15', display: 'inline-block' }} />
-              Mod (22-39)
-            </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ width: 8, height: 8, borderRadius: 2, background: '#f97316', display: 'inline-block' }} />
-              Heavy (10-21)
-            </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ width: 8, height: 8, borderRadius: 2, background: '#ef4444', display: 'inline-block' }} />
-              Jam (&lt;10)
-            </span>
-          </div>
-        </div>
+        {/* ── Interactive Kaggle `Banglore_traffic_Dataset.csv` Row Selector ── */}
+        {kagglePresets.length > 0 && (
+          <div
+            style={{
+              background: 'rgba(15, 23, 42, 0.95)',
+              border: '1px solid rgba(56, 189, 248, 0.35)',
+              borderRadius: 9,
+              padding: '7px 9px',
+              marginBottom: 8,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+              <span style={{ fontSize: 8.5, color: '#38bdf8', fontWeight: 900, letterSpacing: 0.6 }}>
+                📊 KAGGLE CSV REPLAY (DRIVES CAR PHYSICS)
+              </span>
+              <span style={{ fontSize: 8.5, color: '#94a3b8' }}>
+                {kaggleRec.date || '2024-08-02'}
+              </span>
+            </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7, marginBottom: 9 }}>
-          <div style={{ background: 'rgba(15,23,42,0.85)', padding: '6px 9px', borderRadius: 8, border: '1px solid #1e293b' }}>
-            <div style={{ fontSize: 8.5, color: '#64748b' }}>AMB SPEED</div>
-            <div style={{ fontSize: 15, fontWeight: 900, color: '#4ade80' }}>
-              {simState.ambulanceSpeedKmh} <span style={{ fontSize: 9.5, fontWeight: 400, color: '#94a3b8' }}>km/h</span>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 4, marginBottom: 6 }}>
+              {kagglePresets.map((preset) => {
+                const isSelected = kaggleRec.scenarioId === preset.scenarioId;
+                return (
+                  <button
+                    key={preset.scenarioId}
+                    onClick={() => onSelectKaggleScenario && onSelectKaggleScenario(preset)}
+                    style={{
+                      padding: '4px 4px',
+                      borderRadius: 6,
+                      fontSize: 8.5,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      border: isSelected ? '1px solid #38bdf8' : '1px solid #1e293b',
+                      background: isSelected ? 'rgba(56, 189, 248, 0.22)' : '#020617',
+                      color: isSelected ? '#ffffff' : '#94a3b8',
+                      textAlign: 'center',
+                    }}
+                  >
+                    {preset.shortTab}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* 6 Live Kaggle Columns Controlling Car Speed, Spawning, Compliance & Weather */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4, fontSize: 8.5 }}>
+              <div style={{ background: '#020617', padding: '3px 6px', borderRadius: 5, border: '1px solid #1e293b' }}>
+                <div style={{ color: '#64748b', fontSize: 7.5 }}>CSV SPEED</div>
+                <div style={{ color: '#4ade80', fontWeight: 900 }}>{kaggleRec.averageSpeedKmh ?? 24.8} km/h</div>
+              </div>
+              <div style={{ background: '#020617', padding: '3px 6px', borderRadius: 5, border: '1px solid #1e293b' }}>
+                <div style={{ color: '#64748b', fontSize: 7.5 }}>CAPACITY UTIL</div>
+                <div style={{ color: (kaggleRec.roadCapacityUtilizationPct || 0) >= 85 ? '#f87171' : '#fbbf24', fontWeight: 900 }}>
+                  {kaggleRec.roadCapacityUtilizationPct ?? 79.4}%
+                </div>
+              </div>
+              <div style={{ background: '#020617', padding: '3px 6px', borderRadius: 5, border: '1px solid #1e293b' }}>
+                <div style={{ color: '#64748b', fontSize: 7.5 }}>COMPLIANCE</div>
+                <div style={{ color: '#38bdf8', fontWeight: 900 }}>{kaggleRec.trafficSignalCompliancePct ?? 80.5}%</div>
+              </div>
+              <div style={{ background: '#020617', padding: '3px 6px', borderRadius: 5, border: '1px solid #1e293b' }}>
+                <div style={{ color: '#64748b', fontSize: 7.5 }}>WEATHER</div>
+                <div style={{ color: '#e2e8f0', fontWeight: 800 }}>{kaggleRec.weatherConditions || 'Overcast'}</div>
+              </div>
+              <div style={{ background: '#020617', padding: '3px 6px', borderRadius: 5, border: '1px solid #1e293b' }}>
+                <div style={{ color: '#64748b', fontSize: 7.5 }}>INCIDENTS</div>
+                <div style={{ color: (kaggleRec.incidentReports || 0) >= 2 ? '#f87171' : '#cbd5e1', fontWeight: 900 }}>
+                  {kaggleRec.incidentReports ?? 1} (RW: {kaggleRec.roadworkActivity || 'No'})
+                </div>
+              </div>
+              <div style={{ background: '#020617', padding: '3px 6px', borderRadius: 5, border: '1px solid #1e293b' }}>
+                <div style={{ color: '#64748b', fontSize: 7.5 }}>CALC T_HOLD</div>
+                <div style={{ color: '#4ade80', fontWeight: 900 }}>{simState.kaggleHoldSeconds || 23}s</div>
+              </div>
             </div>
           </div>
-          <div style={{ background: 'rgba(15,23,42,0.85)', padding: '6px 9px', borderRadius: 8, border: '1px solid #1e293b' }}>
-            <div style={{ fontSize: 8.5, color: '#64748b' }}>DIST TO SIGNAL</div>
-            <div style={{ fontSize: 15, fontWeight: 900, color: '#fbbf24' }}>
-              {simState.distanceToNextSignal} <span style={{ fontSize: 9.5, fontWeight: 400, color: '#94a3b8' }}>m</span>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 8 }}>
+          <div style={{ background: 'rgba(15,23,42,0.85)', padding: '5px 8px', borderRadius: 8, border: '1px solid #1e293b' }}>
+            <div style={{ fontSize: 8, color: '#64748b' }}>AMB SPEED</div>
+            <div style={{ fontSize: 14, fontWeight: 900, color: '#4ade80' }}>
+              {simState.ambulanceSpeedKmh} <span style={{ fontSize: 9, fontWeight: 400, color: '#94a3b8' }}>km/h</span>
+            </div>
+          </div>
+          <div style={{ background: 'rgba(15,23,42,0.85)', padding: '5px 8px', borderRadius: 8, border: '1px solid #1e293b' }}>
+            <div style={{ fontSize: 8, color: '#64748b' }}>DIST TO SIGNAL</div>
+            <div style={{ fontSize: 14, fontWeight: 900, color: '#fbbf24' }}>
+              {simState.distanceToNextSignal} <span style={{ fontSize: 9, fontWeight: 400, color: '#94a3b8' }}>m</span>
             </div>
           </div>
         </div>
@@ -1091,10 +1133,10 @@ export function MapboxSimulation({
             background: 'rgba(15,23,42,0.9)',
             border: '1px solid #1e293b',
             borderRadius: 9,
-            padding: '7px 10px',
+            padding: '6px 9px',
           }}
         >
-          <div style={{ fontSize: 9, color: '#94a3b8', fontWeight: 700, letterSpacing: 1, marginBottom: 5 }}>
+          <div style={{ fontSize: 8.5, color: '#94a3b8', fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>
             LIVE TRAFFIC SIGNAL PREEMPTION
           </div>
           {(simState.intersectionStates || []).map((node) => {
@@ -1124,17 +1166,17 @@ export function MapboxSimulation({
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  fontSize: 9.5,
-                  padding: '2.5px 0',
+                  fontSize: 9,
+                  padding: '2px 0',
                 }}
               >
-                <span style={{ color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 165 }}>
+                <span style={{ color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 175 }}>
                   {node.name}
                 </span>
                 <span
                   style={{
                     fontWeight: 800,
-                    fontSize: 8.5,
+                    fontSize: 8,
                     padding: '1.5px 6px',
                     borderRadius: 4,
                     color: badgeCol,
@@ -1149,7 +1191,7 @@ export function MapboxSimulation({
         </div>
       </div>
 
-      {/* ── Bottom-Center Floating Control Dock (Guaranteed No Overlap & No Auto-Zoom) ── */}
+      {/* ── Bottom-Center Floating Control Dock ── */}
       <div
         style={{
           position: 'absolute',
@@ -1205,9 +1247,9 @@ export function MapboxSimulation({
               border: '1px solid #ef4444',
               cursor: 'pointer',
             }}
-            title="Inject severe live traffic jam on primary corridor to test automatic ambulance bypass rerouting"
+            title="Switch between Kaggle Peak Rain Jam Row (Incidents >= 2) and Commuter Flow Row"
           >
-            {simState.deadlockRerouteActive ? '🟢 CLEAR TRAFFIC JAM' : '🔴 INJECT LIVE JAM'}
+            {simState.deadlockRerouteActive ? '🟢 RESTORE NORMAL ROW' : '🔴 KAGGLE PEAK JAM ROW'}
           </button>
         )}
 
@@ -1320,7 +1362,6 @@ export function MapboxSimulation({
               </button>
             </div>
 
-            {/* Toggles for 3D Extruded Buildings and Live Traffic Flow Overlay */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
               <label
                 style={{

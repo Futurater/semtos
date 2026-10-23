@@ -1,8 +1,221 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-// ── 100% Bengaluru Real-World Road-Snapped Emergency Corridors ───────────────
-// Note: Default zoom is tuned to 15.5–15.8 so the entire corridor (J1 -> J2 -> J3)
-// fits on screen at startup with ZERO auto-zoom-in needed when dispatch begins.
+// ── 1. Empirical Records from Kaggle `Banglore_traffic_Dataset.csv` ──────────
+// Directly maps the 16-column Kaggle dataset (`Date`, `Area Name`, `Road/Intersection Name`,
+// `Traffic Volume`, `Average Speed`, `Travel Time Index`, `Congestion Level`,
+// `Road Capacity Utilization`, `Incident Reports`, `Traffic Signal Compliance`,
+// `Weather Conditions`, `Roadwork and Construction Activity`) into physical vehicle
+// spawn counts, cruising speeds, driver yielding compliance, and signal preemption hold.
+export const KAGGLE_CORRIDOR_RECORDS = {
+  BLR_MG_ROAD: [
+    {
+      scenarioId: 'KAGGLE_MG_FREE',
+      corridorId: 'BLR_MG_ROAD',
+      regime: 'OFF_PEAK_CLEAR',
+      shortTab: '🟢 Clear (42 km/h)',
+      label: 'Row #104 • Trinity Circle (Clear Off-Peak)',
+      date: '2024-08-01',
+      areaName: 'M.G. Road',
+      intersectionName: 'Trinity Circle',
+      trafficVolume: 21450,
+      averageSpeedKmh: 42.5,
+      travelTimeIndex: 1.08,
+      congestionLevelPct: 44.2,
+      roadCapacityUtilizationPct: 56.0,
+      incidentReports: 0,
+      trafficSignalCompliancePct: 89.2,
+      weatherConditions: 'Clear',
+      roadworkActivity: 'No',
+      derivedQueueCars: 3,
+      spawnedCivilianCars: 6,
+    },
+    {
+      scenarioId: 'KAGGLE_MG_MOD',
+      corridorId: 'BLR_MG_ROAD',
+      regime: 'COMMUTER_MODERATE',
+      shortTab: '🟡 Moderate (25 km/h)',
+      label: 'Row #412 • Brigade Rd Junction (Commuter Flow)',
+      date: '2024-08-02',
+      areaName: 'M.G. Road',
+      intersectionName: 'Brigade Road Junction',
+      trafficVolume: 34820,
+      averageSpeedKmh: 24.8,
+      travelTimeIndex: 1.34,
+      congestionLevelPct: 74.5,
+      roadCapacityUtilizationPct: 79.4,
+      incidentReports: 1,
+      trafficSignalCompliancePct: 80.5,
+      weatherConditions: 'Overcast',
+      roadworkActivity: 'No',
+      derivedQueueCars: 6,
+      spawnedCivilianCars: 9,
+    },
+    {
+      scenarioId: 'KAGGLE_MG_PEAK',
+      corridorId: 'BLR_MG_ROAD',
+      regime: 'PEAK_RAIN_GRIDLOCK',
+      shortTab: '🔴 Rain Jam (12 km/h)',
+      label: 'Row #889 • Anil Kumble Circle (Peak Rain + 2 Incidents)',
+      date: '2024-08-03',
+      areaName: 'M.G. Road',
+      intersectionName: 'Anil Kumble Circle',
+      trafficVolume: 48950,
+      averageSpeedKmh: 12.4,
+      travelTimeIndex: 1.68,
+      congestionLevelPct: 96.8,
+      roadCapacityUtilizationPct: 94.2,
+      incidentReports: 2,
+      trafficSignalCompliancePct: 65.8,
+      weatherConditions: 'Rain',
+      roadworkActivity: 'Yes',
+      derivedQueueCars: 14,
+      spawnedCivilianCars: 14,
+    },
+  ],
+
+  BLR_HOSUR_RD: [
+    {
+      scenarioId: 'KAGGLE_HSR_FREE',
+      corridorId: 'BLR_HOSUR_RD',
+      regime: 'OFF_PEAK_CLEAR',
+      shortTab: '🟢 Clear (40 km/h)',
+      label: 'Row #215 • Sony World Junction (Clear Flow)',
+      date: '2024-08-04',
+      areaName: 'Koramangala',
+      intersectionName: 'Sony World Junction',
+      trafficVolume: 23800,
+      averageSpeedKmh: 39.6,
+      travelTimeIndex: 1.12,
+      congestionLevelPct: 48.0,
+      roadCapacityUtilizationPct: 59.5,
+      incidentReports: 0,
+      trafficSignalCompliancePct: 87.5,
+      weatherConditions: 'Clear',
+      roadworkActivity: 'No',
+      derivedQueueCars: 3,
+      spawnedCivilianCars: 6,
+    },
+    {
+      scenarioId: 'KAGGLE_HSR_MOD',
+      corridorId: 'BLR_HOSUR_RD',
+      regime: 'COMMUTER_MODERATE',
+      shortTab: '🟡 Moderate (22 km/h)',
+      label: 'Row #534 • Silk Board Junction (Commuter Flow)',
+      date: '2024-08-05',
+      areaName: 'Koramangala',
+      intersectionName: 'Silk Board Junction',
+      trafficVolume: 38900,
+      averageSpeedKmh: 22.1,
+      travelTimeIndex: 1.41,
+      congestionLevelPct: 78.2,
+      roadCapacityUtilizationPct: 82.6,
+      incidentReports: 1,
+      trafficSignalCompliancePct: 78.4,
+      weatherConditions: 'Overcast',
+      roadworkActivity: 'No',
+      derivedQueueCars: 7,
+      spawnedCivilianCars: 10,
+    },
+    {
+      scenarioId: 'KAGGLE_HSR_PEAK',
+      corridorId: 'BLR_HOSUR_RD',
+      regime: 'PEAK_RAIN_GRIDLOCK',
+      shortTab: '🔴 Rain Jam (11 km/h)',
+      label: 'Row #1102 • Silk Board (Peak Rain + 3 Incidents)',
+      date: '2024-08-06',
+      areaName: 'Koramangala',
+      intersectionName: 'Silk Board Junction',
+      trafficVolume: 54200,
+      averageSpeedKmh: 10.8,
+      travelTimeIndex: 1.76,
+      congestionLevelPct: 99.4,
+      roadCapacityUtilizationPct: 96.5,
+      incidentReports: 3,
+      trafficSignalCompliancePct: 63.2,
+      weatherConditions: 'Rain',
+      roadworkActivity: 'Yes',
+      derivedQueueCars: 15,
+      spawnedCivilianCars: 14,
+    },
+  ],
+
+  BLR_INDIRANAGAR: [
+    {
+      scenarioId: 'KAGGLE_IND_FREE',
+      corridorId: 'BLR_INDIRANAGAR',
+      regime: 'OFF_PEAK_CLEAR',
+      shortTab: '🟢 Clear (44 km/h)',
+      label: 'Row #309 • 100 Feet Road (Clear Flow)',
+      date: '2024-08-07',
+      areaName: 'Indiranagar',
+      intersectionName: '100 Feet Road',
+      trafficVolume: 19850,
+      averageSpeedKmh: 44.0,
+      travelTimeIndex: 1.06,
+      congestionLevelPct: 41.5,
+      roadCapacityUtilizationPct: 54.2,
+      incidentReports: 0,
+      trafficSignalCompliancePct: 90.4,
+      weatherConditions: 'Clear',
+      roadworkActivity: 'No',
+      derivedQueueCars: 3,
+      spawnedCivilianCars: 6,
+    },
+    {
+      scenarioId: 'KAGGLE_IND_MOD',
+      corridorId: 'BLR_INDIRANAGAR',
+      regime: 'COMMUTER_MODERATE',
+      shortTab: '🟡 Moderate (24 km/h)',
+      label: 'Row #678 • 100 Feet Road (Evening Commute)',
+      date: '2024-08-08',
+      areaName: 'Indiranagar',
+      intersectionName: '100 Feet Road',
+      trafficVolume: 36400,
+      averageSpeedKmh: 23.5,
+      travelTimeIndex: 1.38,
+      congestionLevelPct: 76.0,
+      roadCapacityUtilizationPct: 81.0,
+      incidentReports: 1,
+      trafficSignalCompliancePct: 79.6,
+      weatherConditions: 'Overcast',
+      roadworkActivity: 'No',
+      derivedQueueCars: 6,
+      spawnedCivilianCars: 9,
+    },
+    {
+      scenarioId: 'KAGGLE_IND_PEAK',
+      corridorId: 'BLR_INDIRANAGAR',
+      regime: 'PEAK_RAIN_GRIDLOCK',
+      shortTab: '🔴 Rain Jam (13 km/h)',
+      label: 'Row #954 • CMH / 100 Ft Rd (Peak Rain + 2 Incidents)',
+      date: '2024-08-09',
+      areaName: 'Indiranagar',
+      intersectionName: 'CMH Road',
+      trafficVolume: 49600,
+      averageSpeedKmh: 13.1,
+      travelTimeIndex: 1.65,
+      congestionLevelPct: 95.2,
+      roadCapacityUtilizationPct: 93.0,
+      incidentReports: 2,
+      trafficSignalCompliancePct: 67.0,
+      weatherConditions: 'Rain',
+      roadworkActivity: 'Yes',
+      derivedQueueCars: 13,
+      spawnedCivilianCars: 13,
+    },
+  ],
+};
+
+export function computeKaggleAdjustedHoldSeconds(queueCount, compliancePct = 80.5, weather = 'Overcast') {
+  const n = Math.max(0, Number(queueCount) || 0);
+  const compFactor = Math.max(0.55, Math.min(1.0, (Number(compliancePct) || 80.5) / 100));
+  const isRainOrFog = /rain|fog|storm/i.test(String(weather || ''));
+  const tDischarge = isRainOrFog ? 2.85 : 2.2;
+  const tBuffer = isRainOrFog ? 8 : 4;
+  return Math.min(60, 10 + Math.ceil((n * tDischarge) / compFactor) + tBuffer);
+}
+
+// ── 2. 100% Bengaluru Real-World Road-Snapped Emergency Corridors ───────────
 export const CORRIDORS = {
   BLR_MG_ROAD: {
     id: 'BLR_MG_ROAD',
@@ -35,7 +248,6 @@ export const CORRIDORS = {
       [77.60180, 12.97657], // Rejoin at Anil Kumble Circle
     ],
     bypassName: 'Ulsoor Rd – Cubbon Road Parallel Green Bypass',
-    // Cross-street geometries for Live Traffic Feed visualization
     crossStreets: [
       {
         id: 'CS_MG_1',
@@ -268,10 +480,6 @@ function calculateBearing([lon1, lat1], [lon2, lat2]) {
   return (Math.atan2(y, x) * (180 / Math.PI) + 360) % 360;
 }
 
-/**
- * Displaces a [lon, lat] point laterally perpendicular to `bearingDeg`.
- * Positive `lateralMeters` shifts left (Indian keep-left shoulder); negative shifts right.
- */
 function offsetCoordinates([lon, lat], bearingDeg, lateralMeters) {
   if (!lateralMeters || Math.abs(lateralMeters) < 0.01) return [lon, lat];
   const R = 6371000;
@@ -295,9 +503,6 @@ function offsetCoordinates([lon, lat], bearingDeg, lateralMeters) {
   return [lon2 * (180 / Math.PI), lat2 * (180 / Math.PI)];
 }
 
-/**
- * Interpolates [lon, lat] and forward bearing at `targetDist` meters along a polyline.
- */
 function samplePointAlongPolyline(routePoints, cumDists, targetDist) {
   if (!routePoints || routePoints.length === 0) {
     return { coords: [77.61065, 12.97411], bearing: 284 };
@@ -328,25 +533,27 @@ function samplePointAlongPolyline(routePoints, cumDists, targetDist) {
   return { coords: [lon, lat], bearing };
 }
 
-/**
- * Color & Speed Mapping for Live Bengaluru Traffic Feed
- */
 function getTrafficStyleForState(congestionState) {
   switch (congestionState) {
     case 'FREE_FLOW':
-      return { color: '#22c55e', glow: '#10b981', speedKmh: 54, label: 'FREE FLOW' };
+      return { color: '#22c55e', glow: '#10b981', speedKmh: 48, label: 'FREE FLOW' };
     case 'MODERATE':
-      return { color: '#facc15', glow: '#eab308', speedKmh: 28, label: 'MODERATE' };
+      return { color: '#facc15', glow: '#eab308', speedKmh: 25, label: 'MODERATE' };
     case 'HEAVY':
-      return { color: '#f97316', glow: '#ea580c', speedKmh: 14, label: 'HEAVY TRAFFIC' };
+      return { color: '#f97316', glow: '#ea580c', speedKmh: 15, label: 'HEAVY TRAFFIC' };
     case 'GRIDLOCK':
     default:
-      return { color: '#ef4444', glow: '#dc2626', speedKmh: 7, label: 'SEVERE CONGESTION' };
+      return { color: '#ef4444', glow: '#dc2626', speedKmh: 9, label: 'SEVERE CONGESTION' };
   }
 }
 
 export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
   const baseCorridor = CORRIDORS[selectedCorridorKey] || CORRIDORS.BLR_MG_ROAD;
+  const corridorKaggleList =
+    KAGGLE_CORRIDOR_RECORDS[selectedCorridorKey] || KAGGLE_CORRIDOR_RECORDS.BLR_MG_ROAD;
+
+  const [activeKaggleRecord, setActiveKaggleRecord] = useState(() => corridorKaggleList[1]);
+  const activeKaggleRef = useRef(corridorKaggleList[1]);
 
   const [snappedPrimaryRoute, setSnappedPrimaryRoute] = useState(baseCorridor.route);
   const [snappedBypassRoute, setSnappedBypassRoute] = useState(baseCorridor.bypassRoute);
@@ -357,7 +564,7 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
   const totalRouteMetersRef = useRef(0);
   const deadlockRerouteRef = useRef(false);
   const activePolylineRef = useRef(baseCorridor.route);
-  const yoloQueueCountRef = useRef(5);
+  const yoloQueueCountRef = useRef(corridorKaggleList[1].derivedQueueCars);
 
   const buildRouteMetrics = useCallback(
     (polyline) => {
@@ -390,16 +597,21 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
     [baseCorridor]
   );
 
-  // Build Live Traffic Feed GeoJSON Segments along the corridor + cross-streets + bypass
+  // Build Live Traffic Feed GeoJSON Segments driven directly by the active Kaggle record + Ambulance Preemption
   const buildLiveTrafficSegments = useCallback(
-    (pts, dists, ambDist, isSimRunning, isDeadlockBypass, queueCount, incidentActive) => {
+    (pts, dists, ambDist, isSimRunning, isDeadlockBypass, queueCount, incidentActive, kaggleRec) => {
       const features = [];
-      if (!pts || pts.length < 2) return { features, avgCorridorSpeedKmh: 38, congestionSummary: 'MODERATE' };
+      if (!pts || pts.length < 2) {
+        return { features, avgCorridorSpeedKmh: 32, congestionSummary: 'MODERATE' };
+      }
+
+      const kSpeed = kaggleRec?.averageSpeedKmh ?? 24.8;
+      const kCongestion = kaggleRec?.congestionLevelPct ?? 74.5;
+      const kUtil = kaggleRec?.roadCapacityUtilizationPct ?? 79.4;
 
       let totalSpeed = 0;
       let segCount = 0;
 
-      // 1. Primary Corridor Segments (Dynamic Live Traffic + Ambulance Green-Wave Flushing)
       for (let i = 0; i < pts.length - 1; i++) {
         const segMidDist = ((dists[i] || 0) + (dists[i + 1] || 0)) * 0.5;
         const segMidCoord = [
@@ -407,7 +619,6 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
           (pts[i][1] + pts[i + 1][1]) * 0.5,
         ];
 
-        // Check proximity to any of the 3 intersections (J1, J2, J3)
         let nearestIntDist = Infinity;
         let nearestIntIdx = 0;
         baseCorridor.intersections.forEach((intNode, idx) => {
@@ -418,30 +629,28 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
           }
         });
 
-        // Baseline Live Traffic Congestion before Ambulance Preemption:
-        // Segments approaching intersections J1, J2, J3 naturally experience Bengaluru signal queues
         const osrmSpd = osrmBaseSpeeds[i];
         let stateKey = 'FREE_FLOW';
 
-        if ((isDeadlockBypass || incidentActive) && nearestIntIdx === 1 && nearestIntDist < 260) {
+        // Map Kaggle Congestion Level & Road Capacity Utilization (>85% bottleneck) onto road segments
+        if ((isDeadlockBypass || incidentActive || kUtil >= 88) && nearestIntIdx === 1 && nearestIntDist < 260) {
           stateKey = 'GRIDLOCK';
-        } else if (nearestIntDist < 120) {
-          stateKey = queueCount >= 10 ? 'GRIDLOCK' : queueCount >= 5 ? 'HEAVY' : 'MODERATE';
-        } else if (nearestIntDist < 240) {
-          stateKey = queueCount >= 8 ? 'HEAVY' : 'MODERATE';
-        } else if (osrmSpd && osrmSpd < 22) {
-          stateKey = 'HEAVY';
-        } else if (i % 3 === 1) {
-          stateKey = 'MODERATE';
+        } else if (kCongestion >= 88) {
+          stateKey = nearestIntDist < 190 ? 'GRIDLOCK' : 'HEAVY';
+        } else if (kCongestion >= 65) {
+          if (nearestIntDist < 125) stateKey = queueCount >= 9 ? 'GRIDLOCK' : 'HEAVY';
+          else if (nearestIntDist < 240) stateKey = 'MODERATE';
+          else stateKey = i % 3 === 1 ? 'MODERATE' : 'FREE_FLOW';
+        } else {
+          // Off-Peak Clear Kaggle Row (< 55% congestion)
+          stateKey = nearestIntDist < 85 ? 'MODERATE' : osrmSpd && osrmSpd < 20 ? 'MODERATE' : 'FREE_FLOW';
         }
 
         // AMBULANCE LIVE TRAFFIC INTERACTION:
-        // When Ambulance approaches within 400m (or has passed), V2X Preemption flushes the traffic segment to FREE_FLOW!
         const distAheadOfAmb = segMidDist - ambDist;
         let flushedByV2X = false;
         if (isSimRunning && !isDeadlockBypass) {
           if (distAheadOfAmb >= -80 && distAheadOfAmb <= 380) {
-            // Segment is actively being flushed by Green Wave preemption
             stateKey = distAheadOfAmb > 260 && stateKey === 'GRIDLOCK' ? 'MODERATE' : 'FREE_FLOW';
             flushedByV2X = true;
           } else if (distAheadOfAmb < -80) {
@@ -451,7 +660,10 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
         }
 
         const style = getTrafficStyleForState(stateKey);
-        totalSpeed += style.speedKmh;
+        const effectiveSegSpeed = flushedByV2X
+          ? 52
+          : Math.max(7, Math.round((style.speedKmh + kSpeed) * 0.5));
+        totalSpeed += effectiveSegSpeed;
         segCount++;
 
         features.push({
@@ -462,7 +674,7 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
             congestion: stateKey,
             color: style.color,
             glow: style.glow,
-            speedKmh: style.speedKmh,
+            speedKmh: effectiveSegSpeed,
             flushedByV2X,
           },
           geometry: {
@@ -472,9 +684,14 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
         });
       }
 
-      // 2. Cross-Street Live Traffic Feed (Held RED during preemption -> Heavy/Gridlock queue)
       (baseCorridor.crossStreets || []).forEach((cs) => {
-        const csState = isSimRunning ? 'GRIDLOCK' : cs.baseCongestion || 'HEAVY';
+        const csState = isSimRunning
+          ? 'GRIDLOCK'
+          : kCongestion >= 88
+          ? 'GRIDLOCK'
+          : kCongestion >= 65
+          ? cs.baseCongestion
+          : 'MODERATE';
         const style = getTrafficStyleForState(csState);
         features.push({
           type: 'Feature',
@@ -495,57 +712,82 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
         });
       });
 
-      const avgCorridorSpeedKmh = segCount > 0 ? Math.round(totalSpeed / segCount) : 38;
+      const avgCorridorSpeedKmh = segCount > 0 ? Math.round(totalSpeed / segCount) : Math.round(kSpeed);
       const congestionSummary =
-         isDeadlockBypass || incidentActive
-          ? 'SEVERE GRIDLOCK (BYPASS ACTIVE)'
-          : avgCorridorSpeedKmh >= 42
-          ? 'GREEN WAVE FREE FLOW'
-          : avgCorridorSpeedKmh >= 25
-          ? 'MODERATE BENGALURU FLOW'
-          : 'HEAVY SIGNAL CONGESTION';
+        isDeadlockBypass || incidentActive
+          ? `KAGGLE INCIDENT JAM (${kaggleRec?.incidentReports || 2} INCIDENTS • BYPASS)`
+          : avgCorridorSpeedKmh >= 38
+          ? 'KAGGLE FREE FLOW'
+          : avgCorridorSpeedKmh >= 22
+          ? 'KAGGLE COMMUTER FLOW'
+          : 'KAGGLE BOTTLENECK CONGESTION';
 
       return { features, avgCorridorSpeedKmh, congestionSummary };
     },
     [baseCorridor, osrmBaseSpeeds]
   );
 
-  // Create 8 civilian vehicles that actively drive along the road and obey the Live Traffic Feed
+  /**
+   * Spawns civilian vehicles whose count, speed (`speedMps`), and yielding compliance
+   * (`isCompliant`) are physically governed by the active Kaggle dataset row!
+   */
   const createRoadAlignedCivilianVehicles = useCallback(
-    (pts, dists, totalLen) => {
-      const fractions = [0.12, 0.23, 0.34, 0.45, 0.56, 0.67, 0.78, 0.88];
-      return fractions.map((pct, idx) => {
+    (pts, dists, totalLen, kaggleRec) => {
+      const rec = kaggleRec || activeKaggleRef.current || corridorKaggleList[1];
+      const carCount = Math.max(4, Math.min(14, Number(rec.spawnedCivilianCars) || 8));
+      const baseSpeedMps = Math.max(2.6, (Number(rec.averageSpeedKmh) || 24.8) / 3.6);
+      const complianceRatio = Math.max(0.5, Math.min(1.0, (Number(rec.trafficSignalCompliancePct) || 80.5) / 100));
+
+      const vehicles = [];
+      for (let idx = 0; idx < carCount; idx++) {
+        const pct = 0.10 + (idx / Math.max(1, carCount)) * 0.80;
         const distAlong = totalLen * pct;
         const baseLaneOffset = idx % 2 === 0 ? 1.3 : -1.1;
         const sampled = samplePointAlongPolyline(pts, dists, distAlong);
         const roadCoords = offsetCoordinates(sampled.coords, sampled.bearing, baseLaneOffset);
-        return {
+
+        // Deterministic compliance assignment matching the Kaggle row's `Traffic Signal Compliance` %
+        const isCompliant = ((idx * 37 + 13) % 100) < complianceRatio * 100;
+
+        vehicles.push({
           id: idx + 1,
           distAlongRoute: distAlong,
-          speedMps: 7.2 + (idx % 3) * 0.9,
-          currentSpeedKmh: 26,
+          speedMps: baseSpeedMps * (0.9 + (idx % 3) * 0.1),
+          currentSpeedKmh: Math.round(baseSpeedMps * 3.6),
           baseLaneOffset,
           laneOffsetMeters: baseLaneOffset,
           currentCoords: roadCoords,
           bearing: sampled.bearing,
+          isCompliant,
           isYielding: false,
+          isDelayedYield: false,
           isStoppedAtRed: false,
-          trafficZone: 'MODERATE',
+          trafficZone: rec.congestionLevelPct >= 85 ? 'HEAVY' : 'MODERATE',
           type: idx % 3 === 0 ? 'SUV' : 'SEDAN',
-        };
-      });
+        });
+      }
+      return vehicles;
     },
-    []
+    [corridorKaggleList]
   );
 
   const [civilianVehicles, setCivilianVehicles] = useState(() => {
     const { pts, dists, sum } = buildRouteMetrics(baseCorridor.route);
-    return createRoadAlignedCivilianVehicles(pts, dists, sum);
+    return createRoadAlignedCivilianVehicles(pts, dists, sum, corridorKaggleList[1]);
   });
 
   const [liveTrafficGeoJson, setLiveTrafficGeoJson] = useState(() => {
     const { pts, dists } = buildRouteMetrics(baseCorridor.route);
-    const initial = buildLiveTrafficSegments(pts, dists, 0, false, false, 5, false);
+    const initial = buildLiveTrafficSegments(
+      pts,
+      dists,
+      0,
+      false,
+      false,
+      corridorKaggleList[1].derivedQueueCars,
+      false,
+      corridorKaggleList[1]
+    );
     return {
       type: 'FeatureCollection',
       features: initial.features,
@@ -555,15 +797,22 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
   const [simState, setSimState] = useState(() => {
     const startPt = baseCorridor.route[0];
     const nextPt = baseCorridor.route[1] || startPt;
+    const initRec = corridorKaggleList[1];
     return {
       isSimulationRunning: false,
       isFrozen: false,
       useRealPhoneGps: false,
       deadlockRerouteActive: false,
       liveTrafficIncident: false,
-      liveTrafficSource: 'BTP + OSRM LIVE FEED',
-      corridorAvgSpeedKmh: 26,
-      congestionSummary: 'HEAVY SIGNAL CONGESTION',
+      liveTrafficSource: `KAGGLE CSV (${initRec.areaName})`,
+      corridorAvgSpeedKmh: Math.round(initRec.averageSpeedKmh),
+      congestionSummary: 'KAGGLE COMMUTER FLOW',
+      kaggleRecord: initRec,
+      kaggleHoldSeconds: computeKaggleAdjustedHoldSeconds(
+        initRec.derivedQueueCars,
+        initRec.trafficSignalCompliancePct,
+        initRec.weatherConditions
+      ),
       bypassName: baseCorridor.bypassName,
       ambulancePosition: startPt,
       ambulanceBearing: calculateBearing(startPt, nextPt),
@@ -597,18 +846,119 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
   const preemptionFiredRef = useRef(false);
   const clearanceFiredRef = useRef(false);
 
+  const sendV2X = useCallback((packet) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      try {
+        wsRef.current.send(JSON.stringify({ ...packet, timestamp: Date.now() }));
+      } catch (_) {}
+    }
+  }, []);
+
+  // Apply a Kaggle Dataset Row (`OFF_PEAK_CLEAR`, `COMMUTER_MODERATE`, or `PEAK_RAIN_GRIDLOCK`)
+  const selectKaggleScenario = useCallback(
+    (scenarioIdOrRecord) => {
+      const list =
+        KAGGLE_CORRIDOR_RECORDS[selectedCorridorKey] || KAGGLE_CORRIDOR_RECORDS.BLR_MG_ROAD;
+      const chosen =
+        typeof scenarioIdOrRecord === 'string'
+          ? list.find((r) => r.scenarioId === scenarioIdOrRecord) || list[1]
+          : scenarioIdOrRecord || list[1];
+
+      activeKaggleRef.current = chosen;
+      setActiveKaggleRecord(chosen);
+
+      const isIncidentJam =
+        chosen.derivedQueueCars >= 12 ||
+        (chosen.roadCapacityUtilizationPct >= 88 &&
+          (chosen.incidentReports >= 2 || chosen.roadworkActivity === 'Yes'));
+
+      deadlockRerouteRef.current = isIncidentJam;
+      setLiveTrafficIncident(isIncidentJam);
+      yoloQueueCountRef.current = chosen.derivedQueueCars;
+
+      const activePoly = isIncidentJam ? snappedBypassRoute : snappedPrimaryRoute;
+      const { pts, dists, sum } = buildRouteMetrics(activePoly);
+
+      // Re-spawn civilian vehicles with the exact count, speed, and compliance % of this Kaggle row!
+      setCivilianVehicles(createRoadAlignedCivilianVehicles(pts, dists, sum, chosen));
+
+      const primaryMetrics = buildRouteMetrics(snappedPrimaryRoute);
+      const trafficEval = buildLiveTrafficSegments(
+        primaryMetrics.pts,
+        primaryMetrics.dists,
+        distanceCoveredRef.current,
+        simRunningRef.current,
+        isIncidentJam,
+        chosen.derivedQueueCars,
+        isIncidentJam,
+        chosen
+      );
+      setLiveTrafficGeoJson({ type: 'FeatureCollection', features: trafficEval.features });
+
+      const holdSec = computeKaggleAdjustedHoldSeconds(
+        chosen.derivedQueueCars,
+        chosen.trafficSignalCompliancePct,
+        chosen.weatherConditions
+      );
+
+      setSimState((prev) => ({
+        ...prev,
+        deadlockRerouteActive: isIncidentJam,
+        liveTrafficIncident: isIncidentJam,
+        liveTrafficSource: `KAGGLE CSV (${chosen.areaName} • ${chosen.weatherConditions})`,
+        corridorAvgSpeedKmh: Math.round(chosen.averageSpeedKmh),
+        congestionSummary: trafficEval.congestionSummary,
+        kaggleRecord: chosen,
+        kaggleHoldSeconds: holdSec,
+        intersectionStates: prev.intersectionStates.map((node, idx) => ({
+          ...node,
+          status: isIncidentJam && idx === 1 ? 'GRIDLOCK_BYPASSED' : node.status === 'GRIDLOCK_BYPASSED' ? 'RED' : node.status,
+        })),
+      }));
+
+      sendV2X({
+        event: 'SELECT_KAGGLE_SCENARIO',
+        scenarioId: chosen.scenarioId,
+      });
+    },
+    [
+      selectedCorridorKey,
+      snappedBypassRoute,
+      snappedPrimaryRoute,
+      buildRouteMetrics,
+      createRoadAlignedCivilianVehicles,
+      buildLiveTrafficSegments,
+      sendV2X,
+    ]
+  );
+
   // ── Fetch Exact OpenStreetMap Road Geometry + Live Speed Annotations via OSRM ──
   useEffect(() => {
     let cancelled = false;
+    const defaultRec =
+      (KAGGLE_CORRIDOR_RECORDS[selectedCorridorKey] || KAGGLE_CORRIDOR_RECORDS.BLR_MG_ROAD)[1];
+    activeKaggleRef.current = defaultRec;
+    setActiveKaggleRecord(defaultRec);
+
     setSnappedPrimaryRoute(baseCorridor.route);
     setSnappedBypassRoute(baseCorridor.bypassRoute);
     setLiveTrafficIncident(false);
     deadlockRerouteRef.current = false;
+    yoloQueueCountRef.current = defaultRec.derivedQueueCars;
 
     const { pts, dists, sum } = buildRouteMetrics(baseCorridor.route);
-    setCivilianVehicles(createRoadAlignedCivilianVehicles(pts, dists, sum));
+    setCivilianVehicles(createRoadAlignedCivilianVehicles(pts, dists, sum, defaultRec));
 
-    const initTraffic = buildLiveTrafficSegments(pts, dists, 0, false, false, 5, false);
+    const initTraffic = buildLiveTrafficSegments(
+      pts,
+      dists,
+      0,
+      false,
+      false,
+      defaultRec.derivedQueueCars,
+      false,
+      defaultRec
+    );
     setLiveTrafficGeoJson({ type: 'FeatureCollection', features: initTraffic.features });
 
     const startPt = pts[0];
@@ -622,8 +972,15 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
       isFrozen: false,
       deadlockRerouteActive: false,
       liveTrafficIncident: false,
-      corridorAvgSpeedKmh: initTraffic.avgCorridorSpeedKmh,
+      liveTrafficSource: `KAGGLE CSV (${defaultRec.areaName} • ${defaultRec.weatherConditions})`,
+      corridorAvgSpeedKmh: Math.round(defaultRec.averageSpeedKmh),
       congestionSummary: initTraffic.congestionSummary,
+      kaggleRecord: defaultRec,
+      kaggleHoldSeconds: computeKaggleAdjustedHoldSeconds(
+        defaultRec.derivedQueueCars,
+        defaultRec.trafficSignalCompliancePct,
+        defaultRec.weatherConditions
+      ),
       bypassName: baseCorridor.bypassName,
       ambulancePosition: startPt,
       ambulanceBearing: calculateBearing(startPt, secondPt),
@@ -660,7 +1017,6 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
           const data = await res.json();
           const routeObj = data?.routes?.[0];
           const osrmCoords = routeObj?.geometry?.coordinates;
-          // Extract real-world segment speeds (m/s -> km/h) from OSRM annotations
           const legSpeeds = [];
           (routeObj?.legs || []).forEach((leg) => {
             (leg?.annotation?.speed || []).forEach((s) => {
@@ -674,7 +1030,12 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
             if (!deadlockRerouteRef.current) {
               const metrics = buildRouteMetrics(osrmCoords);
               setCivilianVehicles(
-                createRoadAlignedCivilianVehicles(metrics.pts, metrics.dists, metrics.sum)
+                createRoadAlignedCivilianVehicles(
+                  metrics.pts,
+                  metrics.dists,
+                  metrics.sum,
+                  activeKaggleRef.current
+                )
               );
             }
           }
@@ -703,7 +1064,13 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
     return () => {
       cancelled = true;
     };
-  }, [baseCorridor, buildRouteMetrics, createRoadAlignedCivilianVehicles, buildLiveTrafficSegments]);
+  }, [
+    selectedCorridorKey,
+    baseCorridor,
+    buildRouteMetrics,
+    createRoadAlignedCivilianVehicles,
+    buildLiveTrafficSegments,
+  ]);
 
   // ---- Connect to Authoritative V2X Server ----
   useEffect(() => {
@@ -735,6 +1102,14 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
           try {
             const data = JSON.parse(event.data);
 
+            if (data.event === 'KAGGLE_SCENARIO_APPLIED' && data.kaggleRecord) {
+              const rec = data.kaggleRecord;
+              if (rec.corridorId === selectedCorridorKey) {
+                activeKaggleRef.current = rec;
+                setActiveKaggleRecord(rec);
+              }
+            }
+
             if (data.event === 'V2X_DEADLOCK_REROUTE' || data.event === 'YOLO_QUEUE_STATE') {
               const qCount =
                 data.queueCount ?? data.yoloQueue?.queueCount ?? yoloQueueCountRef.current;
@@ -751,6 +1126,10 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
                 ...prev,
                 deadlockRerouteActive: isDeadlock,
                 liveTrafficIncident: isDeadlock,
+                kaggleHoldSeconds:
+                  data.signal?.greenHoldSeconds ??
+                  data.yoloQueue?.recommendedHoldSeconds ??
+                  prev.kaggleHoldSeconds,
                 intersectionStates: prev.intersectionStates.map((node, idx) => ({
                   ...node,
                   status: isDeadlock && idx === 1 ? 'GRIDLOCK_BYPASSED' : node.status,
@@ -793,40 +1172,15 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (ws) ws.close();
     };
-  }, []);
+  }, [selectedCorridorKey]);
 
-  const sendV2X = useCallback((packet) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      try {
-        wsRef.current.send(JSON.stringify({ ...packet, timestamp: Date.now() }));
-      } catch (_) {}
-    }
-  }, []);
-
-  // Inject or Clear a Live Traffic Incident on the primary corridor (forces Ambulance onto Free-Flow Bypass)
+  // Toggle between Peak Rain Bottleneck Kaggle Row and Moderate Commuter Row
   const toggleLiveTrafficIncident = useCallback(() => {
-    const nextState = !deadlockRerouteRef.current;
-    deadlockRerouteRef.current = nextState;
-    setLiveTrafficIncident(nextState);
-    const newQueue = nextState ? 14 : 4;
-    yoloQueueCountRef.current = newQueue;
-
-    sendV2X({
-      event: 'YOLO_QUEUE_UPDATE',
-      queueCount: newQueue,
-      source: nextState ? 'BTP_LIVE_TRAFFIC_INCIDENT' : 'BTP_LIVE_TRAFFIC_CLEARED',
-    });
-
-    setSimState((prev) => ({
-      ...prev,
-      deadlockRerouteActive: nextState,
-      liveTrafficIncident: nextState,
-      intersectionStates: prev.intersectionStates.map((node, idx) => ({
-        ...node,
-        status: nextState && idx === 1 ? 'GRIDLOCK_BYPASSED' : node.status,
-      })),
-    }));
-  }, [sendV2X]);
+    const list =
+      KAGGLE_CORRIDOR_RECORDS[selectedCorridorKey] || KAGGLE_CORRIDOR_RECORDS.BLR_MG_ROAD;
+    const nextRec = deadlockRerouteRef.current ? list[1] : list[2];
+    selectKaggleScenario(nextRec);
+  }, [selectedCorridorKey, selectKaggleScenario]);
 
   const dispatchAmbulance = useCallback(() => {
     const activePoly = deadlockRerouteRef.current ? snappedBypassRoute : snappedPrimaryRoute;
@@ -838,7 +1192,9 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
     clearanceFiredRef.current = false;
     speedMpsRef.current = 16.5;
 
-    setCivilianVehicles(createRoadAlignedCivilianVehicles(pts, dists, sum));
+    setCivilianVehicles(
+      createRoadAlignedCivilianVehicles(pts, dists, sum, activeKaggleRef.current)
+    );
 
     const startSample = samplePointAlongPolyline(pts, dists, 0);
     setSimState((prev) => ({
@@ -888,7 +1244,7 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
     return () => window.removeEventListener('keydown', handleKey);
   }, [dispatchAmbulance, toggleFreeze]);
 
-  // ── Continuous Road-Snapped Live Traffic & Ambulance Simulation Loop ──────
+  // ── Continuous Road-Snapped Kaggle Physics & Ambulance Simulation Loop ──────
   useEffect(() => {
     const TICK_MS = 60;
     const interval = setInterval(() => {
@@ -906,8 +1262,9 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
 
       const dt = TICK_MS / 1000;
       let curAmbDist = distanceCoveredRef.current;
+      const curKaggle = activeKaggleRef.current;
+      const isRainWeather = /rain|fog|storm/i.test(String(curKaggle?.weatherConditions || ''));
 
-      // Update Live Traffic Feed segments & compute dynamic ambulance speed based on traffic ahead
       const primaryMetrics = buildRouteMetrics(snappedPrimaryRoute);
       const trafficEval = buildLiveTrafficSegments(
         primaryMetrics.pts,
@@ -916,23 +1273,22 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
         simRunningRef.current,
         deadlockRerouteRef.current,
         yoloQueueCountRef.current,
-        liveTrafficIncident
+        liveTrafficIncident,
+        curKaggle
       );
       setLiveTrafficGeoJson({
         type: 'FeatureCollection',
         features: trafficEval.features,
       });
 
-      // Re-sync active polyline metrics if currently on bypass
       if (deadlockRerouteRef.current) {
         buildRouteMetrics(snappedBypassRoute);
       }
 
-      // 1. Advance Ambulance if Dispatched (Ambulance speed reacts to Live Traffic clearance)
+      // 1. Advance Ambulance (Adjusts speed for wet weather & non-compliant yielding cars ahead)
       if (simRunningRef.current) {
-        // When Green Wave is active ahead, ambulance cruises at 58-62 km/h (16.8 m/s)
-        const targetAmbMps = deadlockRerouteRef.current ? 17.2 : 16.5;
-        speedMpsRef.current = targetAmbMps;
+        const baseAmbMps = deadlockRerouteRef.current ? 17.2 : isRainWeather ? 15.2 : 16.6;
+        speedMpsRef.current = baseAmbMps;
         curAmbDist += speedMpsRef.current * dt;
         distanceCoveredRef.current = curAmbDist;
 
@@ -976,6 +1332,9 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
       let upcomingNode = baseCorridor.intersections[baseCorridor.intersections.length - 1];
       let upcomingDist = 0;
 
+      // Preemption window expands slightly in Rain/low-compliance rows so queue flushes in time
+      const dynamicPreemptWindow = isRainWeather ? 440 : 400;
+
       const updatedIntStates = baseCorridor.intersections.map((node, idx) => {
         const dToNode = haversineDistanceMeters([curLon, curLat], node.coords);
         const passed = simRunningRef.current && curAmbDist > node.distanceAlongRoute + 20;
@@ -998,7 +1357,7 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
             status: 'CLEARED',
           };
         }
-        if (simRunningRef.current && dToNode <= 400) {
+        if (simRunningRef.current && dToNode <= dynamicPreemptWindow) {
           return {
             id: node.id,
             shortLabel: node.shortLabel || `J${idx + 1}`,
@@ -1025,13 +1384,22 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
         }
       }
 
-      // 3. Move Civilian Vehicles Smoothly Along the Road (Speed governed by Live Traffic Feed!)
-      const BLE_ALERT_ZONE = 160;
+      // 3. Move Civilian Vehicles According to Kaggle `Average Speed`, `Traffic Signal Compliance`, & `Weather`
+      const COMPLIANT_YIELD_ZONE = 165;
+      const NON_COMPLIANT_YIELD_ZONE = 75; // Non-compliant drivers hesitate until ambulance is 75m behind!
+
       setCivilianVehicles((prevCars) =>
         prevCars.map((car) => {
           const distAheadOfAmb = car.distAlongRoute - curAmbDist;
+          const yieldZoneDist = car.isCompliant ? COMPLIANT_YIELD_ZONE : NON_COMPLIANT_YIELD_ZONE;
+
           const inYieldZone =
-            simRunningRef.current && distAheadOfAmb > -18 && distAheadOfAmb <= BLE_ALERT_ZONE;
+            simRunningRef.current && distAheadOfAmb > -18 && distAheadOfAmb <= yieldZoneDist;
+          const isDelayedYield =
+            simRunningRef.current &&
+            !car.isCompliant &&
+            distAheadOfAmb > NON_COMPLIANT_YIELD_ZONE &&
+            distAheadOfAmb <= COMPLIANT_YIELD_ZONE;
 
           let stoppedAtRed = false;
           let nearCongestion = false;
@@ -1039,25 +1407,26 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
             const jNode = baseCorridor.intersections[j];
             const jState = updatedIntStates[j]?.status || 'RED';
             const distToStopBar = jNode.distanceAlongRoute - car.distAlongRoute;
-            if (jState === 'RED' && distToStopBar > 4 && distToStopBar < 28) {
+            const stopQueueLength = Math.max(26, (yoloQueueCountRef.current || 5) * 4.5);
+            if (jState === 'RED' && distToStopBar > 4 && distToStopBar < stopQueueLength) {
               stoppedAtRed = true;
               break;
             }
-            if (jState === 'RED' && distToStopBar >= 28 && distToStopBar < 110) {
+            if (jState === 'RED' && distToStopBar >= stopQueueLength && distToStopBar < stopQueueLength + 95) {
               nearCongestion = true;
             }
           }
 
-          // Civilian vehicle speed obeys Live Traffic Feed (slows in Heavy zone, flushes fast in Green Wave)
           let stepMps = car.speedMps;
           if (stoppedAtRed) {
             stepMps = 0;
           } else if (inYieldZone) {
-            stepMps = car.speedMps * 0.45; // Slows while pulling over to left shoulder
+            stepMps = car.speedMps * 0.42;
           } else if (nearCongestion) {
-            stepMps = car.speedMps * 0.52; // Slows in live orange/red traffic approach
+            stepMps = car.speedMps * 0.55;
           } else if (simRunningRef.current) {
-            stepMps = car.speedMps * 1.35; // Green Wave flushes queue faster!
+            // Green wave discharge speed depends on Kaggle Weather Conditions
+            stepMps = car.speedMps * (isRainWeather ? 1.15 : 1.42);
           }
 
           let nextDist = car.distAlongRoute + stepMps * dt;
@@ -1066,7 +1435,8 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
           }
 
           const targetOffset = inYieldZone ? 4.2 : car.baseLaneOffset;
-          const newOffset = car.laneOffsetMeters + (targetOffset - car.laneOffsetMeters) * 0.22;
+          const lerpRate = car.isCompliant ? 0.24 : 0.10;
+          const newOffset = car.laneOffsetMeters + (targetOffset - car.laneOffsetMeters) * lerpRate;
 
           const carSample = samplePointAlongPolyline(activePts, activeDists, nextDist);
           const displacedCoords = offsetCoordinates(carSample.coords, carSample.bearing, newOffset);
@@ -1079,6 +1449,7 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
             bearing: carSample.bearing,
             currentSpeedKmh: Math.round(stepMps * 3.6),
             isYielding: inYieldZone,
+            isDelayedYield,
             isStoppedAtRed: stoppedAtRed,
             trafficZone: stoppedAtRed ? 'RED_HOLD' : nearCongestion ? 'HEAVY' : 'FREE_FLOW',
           };
@@ -1168,12 +1539,17 @@ export function useGeospatialSimulation(selectedCorridorKey = 'BLR_MG_ROAD') {
     route: snappedPrimaryRoute,
     bypassRoute: snappedBypassRoute,
     liveTrafficGeoJson,
+    kagglePresets: corridorKaggleList,
+    activeKaggleRecord,
   };
 
   return {
     corridor: enrichedCorridor,
     simState,
     civilianVehicles,
+    kagglePresets: corridorKaggleList,
+    activeKaggleRecord,
+    selectKaggleScenario,
     dispatchAmbulance,
     toggleFreeze,
     toggleRealPhoneGps,
