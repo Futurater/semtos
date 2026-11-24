@@ -8,6 +8,53 @@ import { useCase3TrafficStream } from '../../hooks/useCase3TrafficStream';
 import { useHardwareSerial } from '../../hooks/useHardwareSerial';
 import { useHardwareWifi } from '../../hooks/useHardwareWifi';
 import { Canvas3D } from '../../components/Canvas3D';
+import { createCase2Simulation } from '../../components/case2Simulation';
+
+function Case2HUD({ simulation, frozen, dispatch, toggleFreeze, onBackToMenu }) {
+  const { phase, northStatus } = simulation;
+  const eastGreen = phase === 'eastGreen';
+  const northGreen = phase === 'northGreen';
+  const active = phase !== 'ready' && phase !== 'complete';
+  const eastStatus = {
+    ready: 'Ready',
+    approach: 'Approaching the junction',
+    eastGreen: 'Priority · green corridor',
+    eastClearance: 'Junction traffic clearing',
+  }[phase] || 'Junction clear · hospital-bound';
+
+  return (
+    <section aria-label="Case 2 controls" className="fixed bottom-5 left-5 z-[100] w-72 max-w-[calc(100vw-40px)] rounded-xl border border-blue-400/60 bg-slate-950/95 p-4 font-mono text-xs shadow-xl">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <span className="font-bold text-blue-300">CASE 02 · DUAL AMBULANCE</span>
+        <button onClick={onBackToMenu} className="rounded bg-slate-800 px-2 py-1 text-slate-200">Menu</button>
+      </div>
+      <div aria-live="polite" className="space-y-3">
+        {[
+          { direction: 'Eastbound', green: eastGreen, status: eastStatus },
+          { direction: 'Northbound', green: northGreen, status: northStatus },
+        ].map(({ direction, green, status }) => (
+          <div key={direction} className="border-t border-slate-700 pt-2">
+            <div className="flex items-center justify-between font-bold text-slate-100">
+              {direction}
+              <span className={green ? 'text-green-400' : 'text-red-400'}>{green ? 'GREEN' : 'RED'}</span>
+            </div>
+            <div className="mt-1 text-slate-300">{status}</div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 flex gap-2">
+        <button onClick={dispatch} disabled={active} className="flex-1 rounded bg-blue-300 px-2 py-2 font-bold text-slate-950 disabled:bg-slate-800 disabled:text-slate-300">
+          {phase === 'ready' ? 'Dispatch both [Enter]' : phase === 'complete' ? 'Run again [Enter]' : 'Ambulances dispatched'}
+        </button>
+        {active && (
+          <button onClick={toggleFreeze} className="rounded bg-slate-800 px-2 py-2 text-slate-100">
+            {frozen ? 'Resume [F]' : 'Pause [F]'}
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
 
 function Case1SignalHUD({ phase, nGreen, sGreen, eGreen, wGreen, nYellow, sYellow, eYellow, wYellow, timeRemaining, onBackToMenu, onSwitchCase }) {
   const phaseLabel = {
@@ -281,7 +328,34 @@ export default function Dashboard() {
   const case1Signal = useTrafficSignal();
 
   // Case 3 Hook
-  const case3 = useCase3TrafficStream();
+  const case3 = useCase3TrafficStream(selectedCase === 3);
+  const [case2, setCase2] = useState(createCase2Simulation);
+  const [case2Frozen, setCase2Frozen] = useState(false);
+  const [, setCase2Revision] = useState(0);
+  const onCase2Change = useCallback(() => setCase2Revision(value => value + 1), []);
+  const dispatchCase2 = useCallback(() => {
+    setCase2(current => {
+      if (current.phase !== 'ready' && current.phase !== 'complete') return current;
+      return { ...createCase2Simulation(), phase: 'approach', northStatus: 'Approaching the junction' };
+    });
+  }, []);
+  const toggleCase2Freeze = useCallback(() => setCase2Frozen(frozen => !frozen), []);
+
+  useEffect(() => {
+    if (!started || selectedCase !== 2) return;
+    const onKeyDown = (event) => {
+      if (event.repeat || event.target?.closest?.('input,textarea,select,[contenteditable]')) return;
+      if (event.code === 'Enter') {
+        if (event.target?.closest?.('button')) return;
+        event.preventDefault();
+        dispatchCase2();
+      } else if (event.code === 'KeyF' && case2.phase !== 'ready' && case2.phase !== 'complete') {
+        toggleCase2Freeze();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [started, selectedCase, case2, dispatchCase2, toggleCase2Freeze]);
 
   const vehiclesRef = useRef([]);
 
@@ -293,6 +367,8 @@ export default function Dashboard() {
       setStarted(true);
       if (selectedCase === 1) {
         case1Stream.dispatchCase1?.();
+      } else if (selectedCase === 2) {
+        dispatchCase2();
       } else {
         case3.dispatchCase3?.();
       }
@@ -305,7 +381,7 @@ export default function Dashboard() {
         case1Stream.toggleFreeze?.();
       }
     }
-  }, [selectedCase, case1Stream, case1Signal, case3]);
+  }, [selectedCase, case1Stream, case1Signal, case3, dispatchCase2]);
 
   // ESP32 Web Serial Hardware Synchronization (Zero-Fail Fallback)
   const {
@@ -457,11 +533,11 @@ export default function Dashboard() {
     {
       id: 2,
       label: 'CASE 02',
-      title: 'Adaptive Signal Timing',
-      description: 'AI-powered signal timing that dynamically adjusts green phase durations based on real-time vehicle queue density detected on each arm of the intersection.',
-      tags: ['Queue Detection', 'AI Optimization', 'Dynamic Timing'],
+      title: 'Dual-Ambulance Priority Handoff',
+      description: 'Two ambulances reach the junction together. Eastbound crosses first while northbound eases through the queue and waits for green.',
+      tags: ['Eastbound Priority', 'Driver Yielding', 'Signal Handoff'],
       color: '#60a5fa',
-      available: false
+      available: true
     },
     {
       id: 3,
@@ -514,6 +590,13 @@ export default function Dashboard() {
     );
   }
 
+  const case2Signals = {
+    phase: case2.phase,
+    eGreen: case2.phase === 'eastGreen',
+    nGreen: case2.phase === 'northGreen',
+  };
+  const signals = selectedCase === 1 ? case1Signal : selectedCase === 2 ? case2Signals : case3.signals;
+
   return (
     <main className="relative w-screen h-screen overflow-hidden bg-black text-slate-200 font-sans">
       <div className="absolute inset-0 z-0">
@@ -523,20 +606,16 @@ export default function Dashboard() {
           ambulancePosition={case1Stream.ambulancePosition}
           ambulanceA={case3.ambulanceA}
           ambulanceB={case3.ambulanceB}
+          case2={selectedCase === 2 ? case2 : null}
+          onCase2Change={onCase2Change}
           activeCamFollow={case3.activeCamFollow}
           onSetCamFollow={case3.setCamFollow}
-          isSimulationRunning={selectedCase === 1 ? case1Stream.isSimulationRunning : case3.isSimulationRunning}
-          isPreempted={selectedCase === 1 ? case1Signal.isPreempted : (case3.deadlockDetected && !case3.trafficCycleActive)}
-          isFrozen={selectedCase === 1 ? case1Stream.isFrozen : case3.isFrozen}
-          signalPhase={selectedCase === 1 ? case1Signal.signalPhase : case3.signals.phase}
-          nGreen={selectedCase === 1 ? case1Signal.nGreen : case3.signals.nGreen}
-          sGreen={selectedCase === 1 ? case1Signal.sGreen : case3.signals.sGreen}
-          eGreen={selectedCase === 1 ? case1Signal.eGreen : case3.signals.eGreen}
-          wGreen={selectedCase === 1 ? case1Signal.wGreen : case3.signals.wGreen}
-          nYellow={selectedCase === 1 ? case1Signal.nYellow : case3.signals.nYellow}
-          sYellow={selectedCase === 1 ? case1Signal.sYellow : case3.signals.sYellow}
-          eYellow={selectedCase === 1 ? case1Signal.eYellow : case3.signals.eYellow}
-          wYellow={selectedCase === 1 ? case1Signal.wYellow : case3.signals.wYellow}
+          isSimulationRunning={selectedCase === 1 ? case1Stream.isSimulationRunning : selectedCase === 2 ? case2.phase !== 'ready' && case2.phase !== 'complete' : case3.isSimulationRunning}
+          isPreempted={selectedCase === 1 ? case1Signal.isPreempted : selectedCase === 2 ? case2Signals.eGreen || case2Signals.nGreen : case3.deadlockDetected && !case3.trafficCycleActive}
+          isFrozen={selectedCase === 1 ? case1Stream.isFrozen : selectedCase === 2 ? case2Frozen : case3.isFrozen}
+          signalPhase={signals.signalPhase ?? signals.phase}
+          nGreen={signals.nGreen} sGreen={signals.sGreen} eGreen={signals.eGreen} wGreen={signals.wGreen}
+          nYellow={signals.nYellow} sYellow={signals.sYellow} eYellow={signals.eYellow} wYellow={signals.wYellow}
         />
       </div>
 
@@ -630,7 +709,7 @@ export default function Dashboard() {
         top: 20,
         right: 20,
         zIndex: 120,
-        display: 'flex',
+        display: selectedCase === 2 ? 'none' : 'flex',
         alignItems: 'center',
         gap: 8,
         fontFamily: 'monospace'
@@ -1065,6 +1144,14 @@ export default function Dashboard() {
           timeRemaining={case1Signal.timeRemaining}
           onBackToMenu={() => setStarted(false)}
           onSwitchCase={(caseId) => setSelectedCase(caseId)}
+        />
+      ) : selectedCase === 2 ? (
+        <Case2HUD
+          simulation={case2}
+          frozen={case2Frozen}
+          dispatch={dispatchCase2}
+          toggleFreeze={toggleCase2Freeze}
+          onBackToMenu={() => setStarted(false)}
         />
       ) : (
         <Case3TelemetryHUD

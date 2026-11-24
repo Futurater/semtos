@@ -1,4 +1,4 @@
-import React, { Suspense, useRef, useState, useEffect } from 'react';
+import React, { Suspense, useRef, useState, useEffect, useMemo } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Html, useProgress, PointerLockControls, TransformControls, useGLTF, Center, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -6,6 +6,7 @@ import { CityScene } from './CityScene';
 import { Ambulance3D } from './Ambulance3D';
 import { TrafficManager } from './TrafficManager';
 import { ComputerVisionOverlay } from './ComputerVisionOverlay';
+import { CASE2_EAST_YIELD_RADIUS } from './case2Simulation';
 
 function Loader() {
   const { progress } = useProgress();
@@ -171,6 +172,11 @@ export function FreeRoamFlightCamera() {
   return null;
 }
 
+function setCase1EntryShot(ambulancePosition, position, target) {
+  position.set(-103.50, 3.33, -2.89);
+  target.set(ambulancePosition.x, 2, ambulancePosition.z);
+}
+
 export function CinematicCamera({ ambulancePosition }) {
   const currentLookAt = useRef(new THREE.Vector3(0, 3, 0));
 
@@ -180,8 +186,7 @@ export function CinematicCamera({ ambulancePosition }) {
 
     // PHASE 1: Fixed corner view watching side-street arrival
     if (ambulancePosition.x < -80) {
-      targetPosition.set(-103.50, 3.33, -2.89);
-      targetLookAt.set(ambulancePosition.x, 2, ambulancePosition.z);
+      setCase1EntryShot(ambulancePosition, targetPosition, targetLookAt);
     } 
     // PHASE 2: IMMEDIATE FOLLOW - Lock behind ambulance as soon as it turns
     else if (ambulancePosition.x >= -80 && ambulancePosition.x < -25) {
@@ -318,6 +323,55 @@ export function Case3OverviewCamera() {
     currentLookAt.current.z = THREE.MathUtils.damp(currentLookAt.current.z, targetLookAt.z, 3.0, dt);
     state.camera.lookAt(currentLookAt.current);
   });
+
+  return null;
+}
+
+function Case2CinematicCamera({ simulation }) {
+  const previousShot = useRef(null);
+  const view = useMemo(() => ({
+    position: new THREE.Vector3(),
+    target: new THREE.Vector3(),
+    lookAt: new THREE.Vector3(),
+  }), []);
+
+  useFrame(({ camera }, delta) => {
+    const { east, north, phase } = simulation;
+    const { position, target, lookAt } = view;
+    let shot;
+
+    if (east.x < -93) {
+      shot = 'eastAvenue';
+      setCase1EntryShot(east, position, target);
+      // Sightline through the open side of the perimeter building.
+      position.set(Math.max(-101, east.x + 8), 3.2, -7.1);
+    } else if (east.x >= -47 && east.x < -28) {
+      // A short look at the northbound queue during the eastbound green.
+      shot = 'northQueue';
+      position.set(-.8, 8.3, Math.min(64, north.z + 13));
+      target.set(north.x, 1.1, north.z - 5);
+    } else if (phase === 'approach' || phase === 'eastGreen' || phase === 'eastClearance') {
+      shot = 'eastCorridor';
+      position.set(east.x + 12, 12, 5.2);
+      target.set(east.x + .5, east.y + 1.3, east.z);
+    } else {
+      shot = 'junction';
+      position.set(-8, 50, 19);
+      target.set(-7, 0, 9);
+    }
+
+    if (shot !== previousShot.current) {
+      // Cut between the two approaches. A camera flight would cross buildings.
+      previousShot.current = shot;
+      camera.position.copy(position);
+      lookAt.copy(target);
+    } else {
+      const blend = 1 - Math.exp(-4 * delta);
+      camera.position.lerp(position, blend);
+      lookAt.lerp(target, blend);
+    }
+    camera.lookAt(lookAt);
+  }, -0.5);
 
   return null;
 }
@@ -575,6 +629,8 @@ export function Canvas3D({
   ambulancePosition,
   ambulanceA,
   ambulanceB,
+  case2,
+  onCase2Change,
   activeCamFollow = 'detour',
   onSetCamFollow,
   isSimulationRunning = false,
@@ -656,6 +712,8 @@ export function Canvas3D({
     ? 'BOUNDARY MODE (Unlocked)'
     : isFreeRoam
     ? 'FREE ROAM ([WASD] Fly | [Mouse] Look | [Ctrl] Unlock Mouse | [C] Exit)'
+    : case2
+    ? 'CASE 02 JUNCTION OVERVIEW'
     : selectedCase === 3
     ? localCamMode === 'corridor'
       ? 'CAM: AMBULANCE A CORRIDOR (South)'
@@ -665,14 +723,14 @@ export function Canvas3D({
     : 'CINEMATIC';
 
   // Primary position to pass to TrafficManager for yield evaluation
-  const primaryAmbPos = selectedCase === 3
+  const primaryAmbPos = case2 ? case2.east : selectedCase === 3
     ? (ambulanceA?.position || { x: 2.2, y: 0.5, z: 90.0 })
     : (ambulancePosition || { x: -120, y: 0.5, z: -6.0 });
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
       <Canvas
-        dpr={[1, 1.5]}
+        dpr={case2 ? 1 : [1, 1.5]}
         gl={{ powerPreference: "high-performance", antialias: true, stencil: false }}
         shadows={{ type: THREE.PCFShadowMap }}
         camera={{ position: [0, 50, 150], fov: 45 }}
@@ -702,7 +760,20 @@ export function Canvas3D({
         <Suspense fallback={<Loader />}>
           <CityScene isPreempted={isPreempted} />
           
-          {selectedCase === 3 ? (
+          {case2 ? (
+            <>
+              <Ambulance3D
+                position={case2.east}
+                floatingLabel="High Priority"
+                corridorActive={eGreen}
+                ringColor="#38bdf8"
+                ringRadius={CASE2_EAST_YIELD_RADIUS}
+                showRing={eGreen}
+                livePosition
+              />
+              <Ambulance3D position={case2.north} livePosition showRing={false} />
+            </>
+          ) : selectedCase === 3 ? (
             <>
               {/* Dual Ambulances for Case 3 */}
               <Ambulance3D position={ambulanceA?.position} ringColor="#3b82f6" label="AMB A (PRIORITY)" />
@@ -730,6 +801,8 @@ export function Canvas3D({
             editMode={editMode}
             boundaryMode={boundaryMode}
             externalVehiclesRef={vehiclesRef}
+            case2={case2}
+            onCase2Change={onCase2Change}
           />
           <ComputerVisionOverlay
             canvasRef={cvCanvasRef}
@@ -765,6 +838,8 @@ export function Canvas3D({
           <FreeRoamFlightCamera />
         ) : isRoadCam ? (
           <AmbulanceApproachCamera ambulancePosition={primaryAmbPos} isSimulationRunning={isSimulationRunning} />
+        ) : case2 ? (
+          <Case2CinematicCamera simulation={case2} />
         ) : selectedCase === 3 ? (
           localCamMode === 'corridor' ? (
             <Case3CorridorCamera ambulanceA={ambulanceA} />
@@ -779,10 +854,10 @@ export function Canvas3D({
       </Canvas>
 
       {/* ── 2D HUD OVERLAYS (Positioned over Canvas) ── */}
-      <div style={{ position: 'fixed', top: '72px', right: '20px', pointerEvents: 'auto', zIndex: 50 }}>
+      <div style={{ position: 'fixed', top: case2 ? '20px' : '72px', right: '20px', pointerEvents: 'auto', zIndex: 50 }}>
         <div className="bg-black/90 text-emerald-400 p-3 rounded-lg border border-emerald-500 font-mono text-sm whitespace-nowrap shadow-2xl backdrop-blur-md">
-          <div className="mb-2 text-xs text-emerald-500 font-bold flex items-center justify-between gap-4">
-            <span>MODE: <span className="text-white font-semibold">{modeLabel}</span></span>
+          <div className={`${case2 ? '' : 'mb-2'} text-xs text-emerald-500 font-bold flex items-center justify-between gap-4`}>
+            {!case2 && <span>MODE: <span className="text-white font-semibold">{modeLabel}</span></span>}
             <button
               onClick={() => {
                 setIsRoadCam(prev => !prev);
@@ -837,13 +912,17 @@ export function Canvas3D({
             </div>
           )}
 
-          <div className="text-xs text-slate-400 mb-1 flex items-center gap-2">
-            <span>[ENTER] Dispatch</span> |
-            <span className="cursor-pointer hover:text-white" onClick={() => setIsFreeRoam(prev => !prev)}>[C] Free Roam</span> |
-            <span>[F] Freeze</span> |
-            <span className="cursor-pointer hover:text-white" onClick={() => setIsRoadCam(prev => !prev)}>[V] Road Cam</span>
-          </div>
-          <strong>CAMERA:</strong> <span ref={camTrackerTextRef} className="text-slate-200">Loading...</span>
+          {!case2 && (
+            <>
+              <div className="text-xs text-slate-400 mb-1 flex items-center gap-2">
+                <span>[ENTER] Dispatch</span> |
+                <span className="cursor-pointer hover:text-white" onClick={() => setIsFreeRoam(prev => !prev)}>[C] Free Roam</span> |
+                <span>[F] Freeze</span> |
+                <span className="cursor-pointer hover:text-white" onClick={() => setIsRoadCam(prev => !prev)}>[V] Road Cam</span>
+              </div>
+              <strong>CAMERA:</strong> <span ref={camTrackerTextRef} className="text-slate-200">Loading...</span>
+            </>
+          )}
         </div>
       </div>
 

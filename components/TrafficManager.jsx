@@ -1,10 +1,9 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { useGLTF, TransformControls } from '@react-three/drei';
 import * as THREE from 'three';
-
-const NORMAL_SPEED = 7; // units per second
-const SPAWN_DISTANCE = 50;
+import { stepCase2 } from './case2Simulation';
+import { createStandardTrafficQueue, NORMAL_TRAFFIC_SPEED as NORMAL_SPEED, TRAFFIC_ROAD_EDGES, TRAFFIC_SPAWN_DISTANCE as SPAWN_DISTANCE } from './standardTraffic';
 
 // ── INTERSECTION BOX ──
 // The physical area where N/S and E/W roads overlap.
@@ -15,21 +14,14 @@ const JX_MAX =  3.5;  // East edge of N/S road
 const JZ_MIN = -9.5;  // South edge of E/W road
 const JZ_MAX =  9.5;  // North edge of E/W road
 
-export function TrafficManager({ selectedCase = 1, ambulancePosition, isPreempted, nGreen=false, sGreen=false, eGreen=false, wGreen=false, nYellow=false, sYellow=false, eYellow=false, wYellow=false, isFrozen, editMode, boundaryMode, externalVehiclesRef }) {
+export function TrafficManager({ selectedCase = 1, ambulancePosition, isPreempted, nGreen=false, sGreen=false, eGreen=false, wGreen=false, nYellow=false, sYellow=false, eYellow=false, wYellow=false, isFrozen, editMode, boundaryMode, externalVehiclesRef, case2, onCase2Change }) {
   // ── ROAD BOUNDARIES (FOOTPATH PROTECTION) ──
   const [boundaries, setBoundaries] = useState(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('semtos_boundaries');
       if (saved) return JSON.parse(saved);
     }
-    return {
-      top: -9.58,       // Z-axis boundary for Eastbound edge (Left)
-      bottom: -1.24,    // Z-axis boundary for Eastbound edge (Right)
-      westTop: 9.58,    // Z-axis boundary for Westbound edge (Right)
-      westBottom: 1.24, // Z-axis boundary for Westbound edge (Left)
-      left: -3.69,      // X-axis boundary for Southbound edge
-      right: 3.44,      // X-axis boundary for Northbound edge
-    };
+    return TRAFFIC_ROAD_EDGES;
   });
 
   useEffect(() => {
@@ -50,11 +42,11 @@ export function TrafficManager({ selectedCase = 1, ambulancePosition, isPreempte
     });
   }, [car1.scene, car2.scene, car3.scene]);
 
-  const models = [
+  const models = useMemo(() => [
     { scene: car1.scene, yOffsetRot: Math.PI },
     { scene: car2.scene, yOffsetRot: 0       },
     { scene: car3.scene, yOffsetRot: 0       },
-  ];
+  ], [car1.scene, car2.scene, car3.scene]);
 
   const frustumRef = useRef(new THREE.Frustum());
   const projScreenMatrixRef = useRef(new THREE.Matrix4());
@@ -69,7 +61,9 @@ export function TrafficManager({ selectedCase = 1, ambulancePosition, isPreempte
     vehiclesRef.current = [];
   }
   
-  if (!vehiclesRef.current || vehiclesRef.current.length === 0) {
+  if (case2) {
+    vehiclesRef.current = case2.cars;
+  } else if (!vehiclesRef.current || vehiclesRef.current.length === 0) {
     const cars = [];
     let idCount = 1;
 
@@ -214,57 +208,9 @@ export function TrafficManager({ selectedCase = 1, ambulancePosition, isPreempte
         });
       });
 
-    } else {
-      // ══════════════════════════════════════════════════════════════════════
-      // CASE 01: STANDARD QUEUE CONFIGURATION
-      // ══════════════════════════════════════════════════════════════════════
-      const lanes = [
-        { dir: 'N', axis: 'z', perpAxis: 'x', sign: -1, perpHome: 2.5, pullOverPerp: 3.1, stopLine: 11, wrapPos: -SPAWN_DISTANCE - 20, startPos: SPAWN_DISTANCE },
-        { dir: 'N', axis: 'z', perpAxis: 'x', sign: -1, perpHome: 1.0, pullOverPerp: 2.5, stopLine: 11, wrapPos: -SPAWN_DISTANCE - 20, startPos: SPAWN_DISTANCE },
-        { dir: 'S', axis: 'z', perpAxis: 'x', sign: 1, perpHome: -3.1, pullOverPerp: -3.4, stopLine: -11, wrapPos: SPAWN_DISTANCE, startPos: -SPAWN_DISTANCE - 10 },
-        { dir: 'S', axis: 'z', perpAxis: 'x', sign: 1, perpHome: -1.8, pullOverPerp: -3.2, stopLine: -11, wrapPos: SPAWN_DISTANCE, startPos: -SPAWN_DISTANCE - 10 },
-        { dir: 'E', axis: 'x', perpAxis: 'z', sign: 1, perpHome: -7.5, pullOverPerp: -9.0, stopLine: -7, wrapPos: SPAWN_DISTANCE, startPos: -SPAWN_DISTANCE - 10 },
-        { dir: 'E', axis: 'x', perpAxis: 'z', sign: 1, perpHome: -4.5, pullOverPerp: -2.0, stopLine: -7, wrapPos: SPAWN_DISTANCE, startPos: -SPAWN_DISTANCE - 10 },
-        { dir: 'W', axis: 'x', perpAxis: 'z', sign: -1, perpHome: 4.5, pullOverPerp: 1.5, stopLine: 6, wrapPos: -SPAWN_DISTANCE - 10, startPos: SPAWN_DISTANCE },
-        { dir: 'W', axis: 'x', perpAxis: 'z', sign: -1, perpHome: 7.5, pullOverPerp: 9.0, stopLine: 6, wrapPos: -SPAWN_DISTANCE - 10, startPos: SPAWN_DISTANCE },
-      ];
-
-      for (let laneIdx = 0; laneIdx < lanes.length; laneIdx++) {
-        const lane = lanes[laneIdx];
-        const carCount = (lane.dir === 'E') ? 9 : (lane.dir === 'N' || lane.dir === 'S') ? 3 : 4;
-        const laneStagger = (laneIdx % 2) * 5;
-        const spacing = (lane.dir === 'E') ? 7 : 8;
-
-        for (let i = 0; i < carCount; i++) {
-          const posParallel = lane.stopLine - (lane.sign * (2 + laneStagger + i * spacing));
-          cars.push({
-            id: idCount++,
-            type: lane.dir,
-            modelIdx: idCount % 3,
-            axis: lane.axis,
-            perpAxis: lane.perpAxis,
-            sign: lane.sign,
-            homePerp: lane.perpHome,
-            pullOverPerp: lane.pullOverPerp,
-            targetPerp: lane.perpHome,
-            wrapPos: lane.wrapPos,
-            startPos: lane.startPos,
-            stopLine: lane.stopLine,
-            pos: new THREE.Vector3(
-              lane.axis === 'x' ? posParallel : lane.perpHome,
-              0.2,
-              lane.axis === 'z' ? posParallel : lane.perpHome
-            ),
-            rotY: 0,
-            receivesBLE: false,
-            speed: 0,
-            state: 'IDLE_QUEUE',
-          });
-        }
-      }
     }
 
-    vehiclesRef.current = cars;
+    vehiclesRef.current = selectedCase === 3 ? cars : createStandardTrafficQueue();
   }
 
   const meshRefs = useRef([]);
@@ -275,13 +221,44 @@ export function TrafficManager({ selectedCase = 1, ambulancePosition, isPreempte
   if (beaconRefs.current.length !== (vehiclesRef.current?.length || 0)) {
     beaconRefs.current = vehiclesRef.current ? vehiclesRef.current.map(() => React.createRef()) : [];
   }
+  const vehicles = vehiclesRef.current;
+  const case2Active = Boolean(case2);
+  const carVisuals = useMemo(() => {
+    // The third model's mesh is offset from its origin. Align it with the
+    // collision footprint for the tighter Case 2 queues.
+    const car3Offset = new THREE.Vector3();
+    if (case2Active) {
+      new THREE.Box3().setFromObject(models[2].scene).getCenter(car3Offset).negate();
+      car3Offset.y = 0;
+    }
+    return vehicles.map((vehicle) => {
+      const modelIndex = vehicle.modelIdx % models.length;
+      const scene = models[modelIndex].scene.clone(true);
+      if (case2Active && modelIndex === 2) scene.position.add(car3Offset);
+      return scene;
+    });
+  }, [vehicles, models, case2Active]);
 
   useFrame((state, delta) => {
     if (editMode || boundaryMode || isFrozen) return;
 
-    const ambPos = new THREE.Vector3(ambulancePosition.x, 0, ambulancePosition.z);
+    if (case2) {
+      const { phase, northStatus } = case2;
+      // Substep on slow frames so braking and clearance checks stay consistent.
+      let remaining = Math.min(delta, 0.5);
+      while (remaining > 0) {
+        const step = Math.min(remaining, 0.05);
+        stepCase2(case2, step);
+        remaining -= step;
+      }
+      if (case2.phase !== phase || case2.northStatus !== northStatus) {
+        onCase2Change();
+      }
+    }
 
-    vehiclesRef.current.forEach((veh) => {
+    const ambPos = new THREE.Vector3(ambulancePosition.x, 0, ambulancePosition.z);
+    const standardVehicles = case2 ? [] : vehiclesRef.current;
+    standardVehicles.forEach((veh) => {
 
       // ══════════════════════════════════════════════════════════════════
       // 0. JUNCTION GEOMETRY
@@ -622,9 +599,10 @@ export function TrafficManager({ selectedCase = 1, ambulancePosition, isPreempte
 
       if (beaconMat) {
         beaconMat.color.set(veh.receivesBLE ? '#10b981' : '#64748b');
+        beaconMat.visible = !case2 || veh.receivesBLE;
       }
     });
-  });
+  }, -1);
 
   // ── BOUNDARY MODE RENDER ───────────────────────────────────────────────────
   if (boundaryMode) {
@@ -806,11 +784,11 @@ export function TrafficManager({ selectedCase = 1, ambulancePosition, isPreempte
             rotation={[0, baseRot + modelConfig.yOffsetRot + veh.rotY, 0]}
           >
             <group scale={[0.6, 0.6, 0.6]}>
-              <primitive object={modelConfig.scene.clone(true)} />
+              <primitive object={carVisuals[idx]} />
             </group>
             <mesh position={[0, 2.2, 0]}>
               <sphereGeometry args={[0.16, 12, 12]} />
-              <meshBasicMaterial ref={beaconRefs.current[idx]} color="#64748b" />
+              <meshBasicMaterial ref={beaconRefs.current[idx]} color="#64748b" visible={!case2} />
             </mesh>
           </group>
         );

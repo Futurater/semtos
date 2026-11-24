@@ -26,7 +26,7 @@ const DETOUR_WAYPOINTS = [
   { id: 4, name: 'Main Avenue Re-entry',    triggerAxis: 'z', triggerVal: -2.89, condition: '>=', targetRot: Math.PI / 2,  nextDir: 'W' },
 ];
 
-export function useCase3TrafficStream() {
+export function useCase3TrafficStream(active = true) {
   const [state, setState] = useState({
     ambulanceA: {
       id: 'AMB_A',
@@ -162,6 +162,7 @@ export function useCase3TrafficStream() {
 
   // Key listeners for Case 3
   useEffect(() => {
+    if (!active) return;
     const handleKeyDown = (e) => {
       if (e.code === 'Enter') {
         e.preventDefault();
@@ -185,7 +186,7 @@ export function useCase3TrafficStream() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [dispatchCase3, addLog]);
+  }, [active, dispatchCase3, addLog]);
 
   // ── Main simulation tick loop (50ms physics / 200ms HUD throttle) ───────────
   // The ref-based position values (posARef, posBRef) update every 50ms tick for
