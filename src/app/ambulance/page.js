@@ -2,13 +2,18 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from 'react';
+import CoordinationQueue from '../../../components/CoordinationQueue';
+import OperationsHeader, { MapCredit } from '../../../components/OperationsHeader';
+import { streetStyle, addTrafficLayer } from '../../../components/corridorMap';
+import { Crosshair, Radio, Layers } from 'lucide-react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
   useV2XReceiver,
   ORIGIN_LNG,
   ORIGIN_LAT,
-  GOOGLE_ROAD_NODES,
+  ROAD_NODES,
+  signalArms,
   buildRoadTrafficLinesGeoJSON,
   twinToRoadGeo,
 } from '../../../hooks/useV2XSync';
@@ -22,8 +27,9 @@ if (typeof window !== 'undefined') {
 
 // ── Free Google Maps 2D Tile Style (Streets, Hybrid Satellite, Pure Satellite) ──
 const GOOGLE_2D_MAP_STYLE = {
-  version: 8,
+  ...streetStyle,
   sources: {
+    ...streetStyle.sources,
     'google-streets': {
       type: 'raster',
       tiles: [
@@ -56,11 +62,12 @@ const GOOGLE_2D_MAP_STYLE = {
     },
   },
   layers: [
+    ...streetStyle.layers,
     {
       id: 'google-streets-layer',
       type: 'raster',
       source: 'google-streets',
-      layout: { visibility: 'visible' },
+      layout: { visibility: 'none' },
     },
     {
       id: 'google-hybrid-layer',
@@ -80,7 +87,7 @@ const GOOGLE_2D_MAP_STYLE = {
 // ── Clean 2D Top-Down Ambulance SVG Icon (Rotates 100% along Road Bearing) ──
 function create2DAmbulanceElement(label, borderColor, badgeBg) {
   const wrapper = document.createElement('div');
-  wrapper.style.cssText = 'position:relative;width:54px;height:54px;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:60;';
+  wrapper.style.cssText = 'position:absolute;width:54px;height:54px;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:60;';
 
   const pulse = document.createElement('div');
   pulse.style.cssText = `
@@ -124,10 +131,13 @@ function create2DAmbulanceElement(label, borderColor, badgeBg) {
 }
 
 export default function AmbulanceSatelliteCockpit() {
-  const { state, sendCommand } = useV2XReceiver();
+  const { state, sendCommand, startDispatch } = useV2XReceiver();
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const mapLoadedRef = useRef(false);
+  const lastTrafficStyle = useRef('');
+  const [mapReady, setMapReady] = useState(false);
+  const [mapError, setMapError] = useState(false);
 
   const amb1MarkerRef = useRef(null);
   const ambAMarkerRef = useRef(null);
@@ -149,10 +159,8 @@ export default function AmbulanceSatelliteCockpit() {
 
   useEffect(() => {
     const onKeyDown = (e) => {
-      if (e.code === 'Enter') {
-        e.preventDefault();
-        sendCommand('DISPATCH');
-      } else if (e.code === 'KeyF') {
+      if (e.target?.closest?.('input, textarea, select, dialog, [contenteditable]')) return;
+      if (e.code === 'KeyF') {
         sendCommand('FREEZE');
       }
     };
@@ -164,7 +172,8 @@ export default function AmbulanceSatelliteCockpit() {
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
-    const map = new maplibregl.Map({
+    let map;
+    try { map = new maplibregl.Map({
       container: mapContainerRef.current,
       style: GOOGLE_2D_MAP_STYLE,
       center: [77.6055, 12.9765],
@@ -175,93 +184,25 @@ export default function AmbulanceSatelliteCockpit() {
       attributionControl: false,
     });
 
+    } catch { setMapError(true); return; }
     map.dragRotate.disable();
     map.touchZoomRotate.disableRotation();
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false, showZoom: true }), 'bottom-right');
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
     if (typeof window !== 'undefined') {
       window.__SEMTOS_MAP__ = map;
     }
 
-    map.on('load', () => {
+    map.on('style.load', () => {
       mapLoadedRef.current = true;
+      setMapReady(true);
 
       // ── Dynamic Red-to-Green Traffic Corridor Lines Source & Layers ──
-      map.addSource('traffic-corridor-lines', {
-        type: 'geojson',
-        data: buildRoadTrafficLinesGeoJSON(state),
-      });
-
-      // Outer Dark Road Casing for High Contrast on Google Streets & Satellite
-      map.addLayer({
-        id: 'traffic-lines-casing',
-        type: 'line',
-        source: 'traffic-corridor-lines',
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: {
-          'line-color': '#020617',
-          'line-width': ['+', ['get', 'width'], 5],
-          'line-opacity': 0.85,
-        },
-      });
-
-      // Soft Neon Glow Halo (Red when traffic is queued, Green when ambulance approaches)
-      map.addLayer({
-        id: 'traffic-lines-glow',
-        type: 'line',
-        source: 'traffic-corridor-lines',
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: {
-          'line-color': ['get', 'color'],
-          'line-width': ['get', 'glowWidth'],
-          'line-opacity': 0.35,
-          'line-blur': 5,
-        },
-      });
-
-      // Solid Core Traffic Line Directly on the Road Asphalt
-      map.addLayer({
-        id: 'traffic-lines-core',
-        type: 'line',
-        source: 'traffic-corridor-lines',
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: {
-          'line-color': ['get', 'color'],
-          'line-width': ['get', 'width'],
-          'line-opacity': 0.96,
-        },
-      });
-
-      // Directional Flow Chevrons Along the Road
-      map.addLayer({
-        id: 'traffic-lines-dash',
-        type: 'line',
-        source: 'traffic-corridor-lines',
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: {
-          'line-color': '#ffffff',
-          'line-width': 2.5,
-          'line-dasharray': [2, 3],
-          'line-opacity': 0.75,
-        },
-      });
-
-      // ── 4-Way Signal Indicators at the Road Stop Lines around J0 (M.G. Rd & Brigade Rd) ──
-      const signalArms = [
-        { arm: 'W', label: 'W (M.G. RD WEST)', lngLat: [77.607400, 12.975170] },
-        { arm: 'E', label: 'E (M.G. RD EAST)', lngLat: [77.608600, 12.974950] },
-        { arm: 'S', label: 'S (BRIGADE RD)',   lngLat: [77.607950, 12.974650] },
-        { arm: 'N', label: 'N (KAMARAJ RD)',   lngLat: [77.608150, 12.975550] },
-      ];
+      addTrafficLayer(map, 'traffic-corridor-lines', buildRoadTrafficLinesGeoJSON(state));
 
       signalArms.forEach((sig) => {
         const el = document.createElement('div');
-        el.style.cssText = `
-          width:22px;height:22px;border-radius:50%;background:#ef4444;
-          border:2.5px solid #ffffff;box-shadow:0 0 12px #ef4444;
-          display:flex;align-items:center;justify-content:center;
-          font-family:monospace;font-size:10px;font-weight:900;color:#fff;
-        `;
-        el.innerText = sig.arm;
+        el.className = 'junction-signal';
+        el.title = sig.arm + ' approach';
         const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
           .setLngLat(sig.lngLat)
           .addTo(map);
@@ -270,20 +211,17 @@ export default function AmbulanceSatelliteCockpit() {
 
       // ── Case 03 Waypoint Badges on the Exact Real-Road Intersections ──
       const wps = [
-        { id: 'WP1', idx: 1, label: 'WP1: KAMARAJ RD TURN',     lngLat: GOOGLE_ROAD_NODES.J0_BRIGADE, color: '#f59e0b' },
-        { id: 'WP2', idx: 2, label: 'WP2: CUBBON RD TURN',      lngLat: GOOGLE_ROAD_NODES.CUBBON_KAM, color: '#38bdf8' },
-        { id: 'WP3', idx: 3, label: 'WP3: CENTRAL ST TURN',     lngLat: GOOGLE_ROAD_NODES.CUBBON_CENT, color: '#38bdf8' },
-        { id: 'WP4', idx: 4, label: 'WP4: ANIL KUMBLE REJOIN',  lngLat: GOOGLE_ROAD_NODES.ANIL_KUMBLE, color: '#22c55e' },
+        { id: 'WP1', idx: 1, label: 'WP1: KAMARAJ RD TURN',     lngLat: ROAD_NODES.J0_BRIGADE, color: '#f59e0b' },
+        { id: 'WP2', idx: 2, label: 'WP2: CUBBON RD TURN',      lngLat: ROAD_NODES.CUBBON_KAM, color: '#38bdf8' },
+        { id: 'WP3', idx: 3, label: 'WP3: CENTRAL ST TURN',     lngLat: ROAD_NODES.CUBBON_CENT, color: '#38bdf8' },
+        { id: 'WP4', idx: 4, label: 'WP4: ANIL KUMBLE REJOIN',  lngLat: ROAD_NODES.ANIL_KUMBLE, color: '#22c55e' },
       ];
 
       wps.forEach((wp) => {
         const el = document.createElement('div');
-        el.style.cssText = `
-          background:rgba(2,6,23,0.92);color:${wp.color};border:1.5px solid ${wp.color};
-          padding:2px 7px;border-radius:5px;font-family:monospace;font-size:9px;font-weight:800;
-          white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.65);pointer-events:none;
-        `;
-        el.innerText = wp.label;
+        el.className = 'map-waypoint';
+        el.title = wp.label;
+        el.textContent = String(wp.idx);
         const m = new maplibregl.Marker({ element: el, anchor: 'bottom', offset: [0, -10] })
           .setLngLat(wp.lngLat)
           .addTo(map);
@@ -293,22 +231,24 @@ export default function AmbulanceSatelliteCockpit() {
       // ── Create 2D Top-Down Ambulance Markers ──
       const el1 = create2DAmbulanceElement('AMB-108 (M.G. ROAD)', '#22c55e', '#052e16');
       amb1MarkerRef.current = new maplibregl.Marker({ element: el1, anchor: 'center' })
-        .setLngLat(GOOGLE_ROAD_NODES.ANIL_KUMBLE)
+        .setLngLat(ROAD_NODES.ANIL_KUMBLE)
         .addTo(map);
 
       const elA = create2DAmbulanceElement('AMB-A (BRIGADE RD)', '#3b82f6', '#172554');
       ambAMarkerRef.current = new maplibregl.Marker({ element: elA, anchor: 'center' })
-        .setLngLat(GOOGLE_ROAD_NODES.BRIGADE_RES)
+        .setLngLat(ROAD_NODES.BRIGADE_RES)
         .addTo(map);
 
       const elB = create2DAmbulanceElement('AMB-B (REROUTE)', '#f59e0b', '#451a03');
       ambBMarkerRef.current = new maplibregl.Marker({ element: elB, anchor: 'center' })
-        .setLngLat(GOOGLE_ROAD_NODES.MG_CARIAPPA)
+        .setLngLat(ROAD_NODES.MG_CARIAPPA)
         .addTo(map);
     });
 
     mapRef.current = map;
     return () => {
+      mapLoadedRef.current = false;
+      waypointMarkersRef.current = [];
       map.remove();
       mapRef.current = null;
     };
@@ -319,11 +259,14 @@ export default function AmbulanceSatelliteCockpit() {
     const map = mapRef.current;
     if (!map || !mapLoadedRef.current) return;
     try {
-      map.setLayoutProperty('google-streets-layer', 'visibility', mapStyleMode === 'STREETS' ? 'visible' : 'none');
+      map.setLayoutProperty('landmarks', 'visibility', mapStyleMode === 'STREETS' ? 'visible' : 'none');
+      map.setMaxBounds(mapStyleMode === 'STREETS' ? [[77.597,12.97],[77.615,12.982]] : null);
+      map.setLayoutProperty('street-labels', 'visibility', mapStyleMode === 'STREETS' ? 'visible' : 'none');
+      map.moveLayer('traffic-corridor-lines-ink', mapStyleMode === 'STREETS' ? 'street-labels' : undefined);
       map.setLayoutProperty('google-hybrid-layer', 'visibility', mapStyleMode === 'HYBRID' ? 'visible' : 'none');
       map.setLayoutProperty('google-satellite-layer', 'visibility', mapStyleMode === 'SATELLITE' ? 'visible' : 'none');
     } catch (_) {}
-  }, [mapStyleMode]);
+  }, [mapStyleMode, mapReady]);
 
   // ── Update 2D Traffic Lines, Signal Lights & Road-Snapped 2D Ambulances at 20Hz ──
   useEffect(() => {
@@ -332,8 +275,11 @@ export default function AmbulanceSatelliteCockpit() {
 
     // 1. Update Dynamic Red-to-Green Traffic Corridor Lines on the Roads
     const trafficSrc = map.getSource('traffic-corridor-lines');
-    if (trafficSrc) {
-      trafficSrc.setData(buildRoadTrafficLinesGeoJSON(state));
+    const traffic = buildRoadTrafficLinesGeoJSON(state);
+    const signature = traffic.features.map(f => f.properties.color).join('|');
+    if (trafficSrc && signature !== lastTrafficStyle.current) {
+      trafficSrc.setData(traffic);
+      lastTrafficStyle.current = signature;
     }
 
     // 2. Show/Hide Case 03 Waypoint Badges & Update Progress Status
@@ -343,11 +289,7 @@ export default function AmbulanceSatelliteCockpit() {
       if (state.selectedCase === 3) {
         const isDone = curWp >= idx;
         const isCurrent = curWp === idx - 1;
-        const color = isDone ? '#22c55e' : isCurrent ? '#f59e0b' : '#38bdf8';
-        el.style.borderColor = color;
-        el.style.color = color;
-        el.style.boxShadow = `0 0 10px ${color}88`;
-        el.innerText = isDone ? `✓ ${label}` : isCurrent ? `◈ ${label}` : label;
+        el.dataset.state = isDone ? 'passed' : isCurrent ? 'current' : 'pending';
       }
     });
 
@@ -365,7 +307,7 @@ export default function AmbulanceSatelliteCockpit() {
       if (!item) return;
       const col = st.green ? '#22c55e' : st.yellow ? '#facc15' : '#ef4444';
       item.el.style.background = col;
-      item.el.style.boxShadow = `0 0 14px ${col}`;
+      item.el.title = arm + (st.green ? " · Open" : st.yellow ? " · Changing" : " · Hold");
     });
 
     // 4. Update 2D Ambulance Positions & Exact Road Bearing Rotation
@@ -413,7 +355,7 @@ export default function AmbulanceSatelliteCockpit() {
         map.easeTo({ center: target, zoom: 16.3, pitch: 0, bearing: 0, duration: 120 });
       }
     }
-  }, [state, activeUnit, cameraMode]);
+  }, [state, activeUnit, cameraMode, mapReady]);
 
   const setViewPreset = (mode) => {
     setCameraMode(mode);
@@ -465,257 +407,42 @@ export default function AmbulanceSatelliteCockpit() {
         color: '#f59e0b',
       };
 
-  return (
-    <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden', background: '#020617', fontFamily: 'monospace', color: '#f8fafc' }}>
-      <style>{`
-        @keyframes ambPulse2D {
-          0% { transform: scale(0.75); opacity: 0.95; }
-          100% { transform: scale(1.85); opacity: 0; }
-        }
-      `}</style>
-
-      {/* Fullscreen 2D Google Map Container */}
-      <div ref={mapContainerRef} style={{ position: 'absolute', inset: 0, zIndex: 1 }} />
-
-      {/* Top Navigation & Case Switcher Bar */}
-      <div style={{
-        position: 'fixed', top: 16, left: 16, right: 16, zIndex: 30,
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10,
-        background: 'rgba(2, 6, 23, 0.92)', border: '1.5px solid #334155', borderRadius: 12,
-        padding: '10px 16px', backdropFilter: 'blur(12px)', boxShadow: '0 8px 32px rgba(0,0,0,0.65)'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <a href="/" style={{ background: '#1e293b', color: '#cbd5e1', border: '1px solid #475569', borderRadius: 8, padding: '6px 10px', fontSize: 11, fontWeight: 800, textDecoration: 'none' }}>
-            ← 3D TWIN CMD
-          </a>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 900, color: '#22c55e', letterSpacing: 1.5 }}>
-              🚑 SEMTOS 2D GOOGLE MAPS CORRIDOR COCKPIT
-            </div>
-            <div style={{ fontSize: 10, color: state.isStandaloneFallback ? '#38bdf8' : '#22c55e' }}>
-              {state.isStandaloneFallback
-                ? '● STANDALONE 2D ROAD-SNAPPED SIMULATOR (RED -> GREEN TRAFFIC LINES)'
-                : '● LIVE 20Hz SYNC WITH 3D TWIN COMMAND CENTER'}
-            </div>
-          </div>
+  const arms = [['North', 's'], ['East', 'w'], ['South', 'n'], ['West', 'e']];
+  const leg = state.case3?.ambulanceB?.currentWaypointIdx ?? 0;
+  const isRunning = isCase1 ? state.case1?.isSimulationRunning : state.case3?.isSimulationRunning;
+  return <main className="operations map-workspace">
+    <OperationsHeader active="/ambulance"/>
+    <div className="map-layout">
+      <aside className="route-panel">
+        <div className="route-heading"><span className="kicker"><span className="index-rule"/> Ambulance desk</span>
+          <h1>{isCase1 ? 'M.G. Road' : activeUnit === 'AMB_A' ? 'Brigade Road' : 'Cubbon detour'}</h1>
+          <p><Radio size={15}/>{state.dispatch?.units[!isCase1 && activeUnit === 'AMB_B' ? 1 : 0]?.vehicleId || (isCase1 ? 'Unit 108' : activeUnit === 'AMB_A' ? 'Unit A' : 'Unit B')} <span className="middot">/</span> {state.isStandaloneFallback ? 'Standalone' : 'Twin live'}</p>
         </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <button
-            onClick={() => sendCommand('SWITCH_CASE', { caseId: 1 })}
-            style={{
-              background: isCase1 ? '#22c55e' : '#0f172a',
-              color: isCase1 ? '#000' : '#94a3b8',
-              border: '1.5px solid #22c55e', borderRadius: 8, padding: '6px 12px', fontSize: 11, fontWeight: 900, cursor: 'pointer'
-            }}
-          >
-            CASE 01 (M.G. ROAD PREEMPTION)
-          </button>
-          <button
-            onClick={() => sendCommand('SWITCH_CASE', { caseId: 3 })}
-            style={{
-              background: !isCase1 ? '#f59e0b' : '#0f172a',
-              color: !isCase1 ? '#000' : '#94a3b8',
-              border: '1.5px solid #f59e0b', borderRadius: 8, padding: '6px 12px', fontSize: 11, fontWeight: 900, cursor: 'pointer'
-            }}
-          >
-            CASE 03 (DUAL AMB & KAMARAJ–CUBBON DETOUR)
-          </button>
-
-          {!isCase1 && (
-            <div style={{ display: 'flex', background: '#0f172a', padding: 3, borderRadius: 8, border: '1px solid #334155', gap: 4 }}>
-              <button
-                onClick={() => setActiveUnit('AMB_B')}
-                style={{
-                  background: activeUnit === 'AMB_B' ? '#f59e0b' : 'transparent',
-                  color: activeUnit === 'AMB_B' ? '#000' : '#94a3b8',
-                  border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 10, fontWeight: 900, cursor: 'pointer'
-                }}
-              >
-                🚑 AMB B (DETOUR)
-              </button>
-              <button
-                onClick={() => setActiveUnit('AMB_A')}
-                style={{
-                  background: activeUnit === 'AMB_A' ? '#3b82f6' : 'transparent',
-                  color: activeUnit === 'AMB_A' ? '#fff' : '#94a3b8',
-                  border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 10, fontWeight: 900, cursor: 'pointer'
-                }}
-              >
-                🚑 AMB A (BRIGADE RD)
-              </button>
-            </div>
-          )}
-
-          <a href="/driver" target="_blank" rel="noopener noreferrer" style={{
-            background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', border: '1px solid #f59e0b',
-            borderRadius: 8, padding: '6px 10px', fontSize: 11, fontWeight: 800, textDecoration: 'none'
-          }}>
-            📱 OPEN PHONE HUD
-          </a>
+        <section className="advisory"><div><i className="status-dot"/><strong>{isRunning ? 'Dispatch active' : 'Ready for coordination'}</strong></div>
+          <p>{isRunning ? activeTelemetry.instruction : 'Standing by at the start of the corridor.'}</p></section>
+        <div className="drive-controls ambulance-controls">
+          <div className="readings"><div><small>Junction distance</small><strong>{activeTelemetry.dist} m</strong></div><div><small>Signal priority</small><strong>{state.signals?.isPreempted ? 'Active' : 'Standby'}</strong></div></div>
+          <div className="field-row"><label className="field">Scenario<select value={state.selectedCase} onChange={e => sendCommand('SWITCH_CASE', {caseId:Number(e.target.value)})}>
+            <option value={1}>01 · Priority corridor</option><option value={3}>03 · Dual response</option></select></label>
+            {!isCase1 && <label className="field">Vehicle<select value={activeUnit} onChange={e => setActiveUnit(e.target.value)}><option value="AMB_A">Unit A</option><option value="AMB_B">Unit B</option></select></label>}</div>
+          <CoordinationQueue className="primary-action" start={startDispatch} currentDispatchId={state.dispatch?.id} busy={isRunning && (isCase1 || !state.case3?.trafficCycleActive)}/>
+          <details className="signal-detail"><summary>Junction signals</summary><div className="arm-grid">{arms.map(([label, key]) => {
+            const phase = state.signals?.[key+'Green'] ? 'Open' : state.signals?.[key+'Yellow'] ? 'Changing' : 'Hold';
+            return <div key={key}><span>{label}</span><b data-phase={phase}>{phase}</b></div>;
+          })}</div></details>
+          {!isCase1 && <details className="signal-detail"><summary>Detour progress</summary><ol>{['M.G. Road','Kamaraj Road','Cubbon Road','Central Street','West departure'].map((name,i) =>
+            <li key={name} aria-current={i===leg ? 'step' : undefined}>{name} {i===leg ? '· Current' : i<leg ? '· Passed' : ''}</li>)}</ol></details>}
         </div>
-      </div>
-
-      {/* Top-Center Turn-by-Turn Navigation Banner */}
-      <div style={{
-        position: 'fixed', top: 82, left: '50%', transform: 'translateX(-50%)', zIndex: 25,
-        background: 'rgba(2, 6, 23, 0.94)', border: `2px solid ${activeTelemetry.color}`,
-        borderRadius: 14, padding: '12px 24px', minWidth: 440, textAlign: 'center',
-        boxShadow: `0 0 28px ${activeTelemetry.color}44`, backdropFilter: 'blur(12px)'
-      }}>
-        <div style={{ fontSize: 10, color: '#94a3b8', letterSpacing: 2, marginBottom: 4 }}>
-          2D ROAD-SNAPPED NAVIGATION • {activeTelemetry.name}
-        </div>
-        <div style={{ fontSize: 15, fontWeight: 900, color: '#f8fafc', letterSpacing: 0.6 }}>
-          {activeTelemetry.instruction}
-        </div>
-      </div>
-
-      {/* Left Cockpit Telemetry & Dispatch Control Panel */}
-      <div style={{
-        position: 'fixed', top: 165, left: 16, zIndex: 25, width: 325,
-        background: 'rgba(2, 6, 23, 0.93)', border: '1.5px solid #334155', borderRadius: 14,
-        padding: 16, backdropFilter: 'blur(12px)', boxShadow: '0 8px 32px rgba(0,0,0,0.65)',
-        display: 'flex', flexDirection: 'column', gap: 12
-      }}>
-        <button
-          onClick={() => sendCommand('DISPATCH')}
-          style={{
-            width: '100%', padding: '11px 0', borderRadius: 10, fontWeight: 900, fontSize: 12,
-            letterSpacing: 1.4, cursor: 'pointer', border: '1px solid #22c55e',
-            background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)', color: '#020617',
-            boxShadow: '0 0 20px rgba(34, 197, 94, 0.45)'
-          }}
-        >
-          ▶ DISPATCH AMBULANCE [ENTER]
-        </button>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 10, padding: 10 }}>
-            <div style={{ fontSize: 9, color: '#64748b' }}>DIST TO SIGNAL</div>
-            <div style={{ fontSize: 22, fontWeight: 900, color: '#38bdf8' }}>{activeTelemetry.dist} m</div>
-          </div>
-          <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 10, padding: 10 }}>
-            <div style={{ fontSize: 9, color: '#64748b' }}>ROAD LINE STATUS</div>
-            <div style={{ fontSize: 13, fontWeight: 900, color: state.signals?.isPreempted ? '#22c55e' : '#ef4444', marginTop: 4 }}>
-              {state.signals?.isPreempted ? '🟢 GREEN WAVE' : '🔴 RED TRAFFIC'}
-            </div>
-          </div>
-        </div>
-
-        {/* 4-Way Signal Matrix */}
-        <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 10, padding: 10 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#94a3b8', marginBottom: 8 }}>
-            <span>M.G. & BRIGADE RD SIGNALS</span>
-            <strong style={{ color: '#38bdf8' }}>{state.signals?.signalPhase}</strong>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: 11 }}>
-            {[
-              { label: 'NORTH (KAMARAJ)', green: state.signals?.sGreen, yellow: state.signals?.sYellow },
-              { label: 'SOUTH (BRIGADE)', green: state.signals?.nGreen, yellow: state.signals?.nYellow },
-              { label: 'EAST (M.G. RD)',  green: state.signals?.wGreen, yellow: state.signals?.wYellow },
-              { label: 'WEST (M.G. RD)',  green: state.signals?.eGreen, yellow: state.signals?.eYellow },
-            ].map((a) => (
-              <div key={a.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span>{a.green ? '🟢' : a.yellow ? '🟡' : '🔴'}</span>
-                <span style={{ color: '#cbd5e1', fontWeight: 700, fontSize: 10 }}>{a.label}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Case 03 5-Leg Real-Road Detour Progress */}
-        {!isCase1 && (
-          <div style={{ background: '#0f172a', border: '1px solid #f59e0b55', borderRadius: 10, padding: 10 }}>
-            <div style={{ fontSize: 9, color: '#f59e0b', fontWeight: 800, marginBottom: 6 }}>
-              AMB-B REAL-ROAD DETOUR (KAMARAJ → CUBBON → ANIL KUMBLE)
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
-              {[
-                { id: 1, label: 'WP1: Kamaraj Rd' },
-                { id: 2, label: 'WP2: Cubbon Rd' },
-                { id: 3, label: 'WP3: Central St' },
-                { id: 4, label: 'WP4: Anil Kumble' },
-              ].map((wp) => {
-                const cur = state.case3?.ambulanceB?.currentWaypointIdx ?? 0;
-                const done = cur > wp.id;
-                const active = cur === wp.id;
-                return (
-                  <div key={wp.id} style={{
-                    padding: '4px 6px', borderRadius: 6, fontSize: 9, fontWeight: 800, textAlign: 'center',
-                    background: done ? '#22c55e' : active ? '#f59e0b' : '#1e293b',
-                    color: done || active ? '#000' : '#64748b'
-                  }}>
-                    {wp.label}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Legend */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 10, color: '#cbd5e1', borderTop: '1px solid #1e293b', paddingTop: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ width: 22, height: 5, borderRadius: 3, background: '#ef4444', display: 'inline-block', boxShadow: '0 0 8px #ef4444' }} />
-            <span>Red Road Line = Traffic Queue / Red Signal</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ width: 22, height: 5, borderRadius: 3, background: '#22c55e', display: 'inline-block', boxShadow: '0 0 8px #22c55e' }} />
-            <span>Green Road Line = Ambulance Preempted Green Wave</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom Camera & 2D Map Layer Controls */}
-      <div style={{
-        position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 25,
-        background: 'rgba(2, 6, 23, 0.94)', border: '1.5px solid #334155', borderRadius: 12,
-        padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-        backdropFilter: 'blur(12px)', boxShadow: '0 8px 32px rgba(0,0,0,0.7)'
-      }}>
-        <span style={{ fontSize: 10, color: '#64748b', marginRight: 2 }}>2D VIEW:</span>
-        {[
-          { id: 'OVERVIEW', label: '🗺️ CORRIDOR OVERVIEW' },
-          { id: 'FOLLOW',   label: '🎯 FOLLOW AMBULANCE' },
-          { id: 'JUNCTION', label: '🚦 BRIGADE RD SIGNAL' },
-          { id: 'FREE',     label: '🖐️ FREE PAN' },
-        ].map((cam) => (
-          <button
-            key={cam.id}
-            onClick={() => setViewPreset(cam.id)}
-            style={{
-              background: cameraMode === cam.id ? '#38bdf8' : '#0f172a',
-              color: cameraMode === cam.id ? '#020617' : '#cbd5e1',
-              border: '1px solid #334155', borderRadius: 8, padding: '6px 10px',
-              fontSize: 10, fontWeight: 900, cursor: 'pointer'
-            }}
-          >
-            {cam.label}
-          </button>
-        ))}
-
-        <span style={{ color: '#334155', margin: '0 2px' }}>|</span>
-        <span style={{ fontSize: 10, color: '#64748b' }}>GOOGLE 2D MAP:</span>
-        {[
-          { id: 'STREETS',   label: '🗺️ GOOGLE 2D STREETS' },
-          { id: 'HYBRID',    label: '🛰️ GOOGLE SATELLITE + ROADS' },
-          { id: 'SATELLITE', label: '🌍 PURE SATELLITE' },
-        ].map((st) => (
-          <button
-            key={st.id}
-            onClick={() => setMapStyleMode(st.id)}
-            style={{
-              background: mapStyleMode === st.id ? '#22c55e' : '#0f172a',
-              color: mapStyleMode === st.id ? '#020617' : '#cbd5e1',
-              border: '1px solid #334155', borderRadius: 8, padding: '6px 10px',
-              fontSize: 10, fontWeight: 900, cursor: 'pointer'
-            }}
-          >
-            {st.label}
-          </button>
-        ))}
-      </div>
+      </aside>
+      <section className="map-stage" aria-label="Ambulance corridor map"><div ref={mapContainerRef} className="map-canvas"/>
+        <div className="map-key"><span><i/>Open</span><span><i/>Hold</span><span><i/>Changing</span></div>
+        <div className="map-tools"><label><Crosshair size={15}/><select aria-label="Ambulance camera" value={cameraMode} onChange={e=>setViewPreset(e.target.value)}>
+          <option value="OVERVIEW">Overview</option><option value="FOLLOW">Follow unit</option><option value="JUNCTION">Junction</option><option value="FREE">Free pan</option></select></label>
+          <label><Layers size={15}/><select aria-label="Map layer" value={mapStyleMode} onChange={e=>setMapStyleMode(e.target.value)}>
+            <option value="STREETS">Streets</option><option value="HYBRID">Hybrid</option><option value="SATELLITE">Satellite</option></select></label></div>
+        {mapError && <p role="status" className="map-error">This map needs WebGL. Dispatch controls are available.</p>}
+        <MapCredit imagery={mapStyleMode !== 'STREETS'}/>
+      </section>
     </div>
-  );
+  </main>;
 }

@@ -52,11 +52,12 @@ export function useTrafficStream(useMockData = true) {
   const dispatchCase1 = useCallback(() => {
     if (simRunningRef.current) return;
     simRunningRef.current = true;
+    isFrozenRef.current = false;
     avenueEventFiredRef.current  = false;
     clearedEventFiredRef.current = false;
     xRef.current = AMB_START_X;
     addLog('Ambulance dispatched — heading East on Main Avenue.');
-    update({ isSimulationRunning: true });
+    update({ isSimulationRunning: true, isFrozen: false });
   }, [addLog, update]);
 
   const toggleFreeze = useCallback(() => {
@@ -65,13 +66,10 @@ export function useTrafficStream(useMockData = true) {
     addLog('System ' + (isFrozenRef.current ? 'FROZEN' : 'UNFROZEN') + '.');
   }, [addLog, update]);
 
-  // ENTER key: dispatch ambulance  |  N key: start normal cycle  |  F key: freeze
   useEffect(() => {
+    if (!useMockData) return;
     const onKey = (e) => {
-      if (e.code === 'Enter') {
-        e.preventDefault();
-        dispatchCase1();
-      }
+      if (e.target?.closest?.('input, textarea, select, dialog, [contenteditable]')) return;
       if (e.code === 'KeyN') {
         e.preventDefault();
         if (onNormalCycleCallbackRef.current) {
@@ -85,12 +83,12 @@ export function useTrafficStream(useMockData = true) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [dispatchCase1, toggleFreeze, addLog]);
+  }, [useMockData, toggleFreeze, addLog]);
 
   // Ambulance movement loop
   useEffect(() => {
     if (!useMockData) return;
-    addLog('System ready. Press ENTER to dispatch ambulance.');
+    addLog('System ready. Complete ambulance intake to dispatch.');
     const interval = setInterval(() => {
       if (!simRunningRef.current || isFrozenRef.current) return;
       xRef.current += AMB_SPEED_DX;
@@ -109,7 +107,7 @@ export function useTrafficStream(useMockData = true) {
       if (x > AMB_WRAP_X) {
         simRunningRef.current = false;
         xRef.current = AMB_START_X;
-        addLog('Ambulance exited. Press ENTER for next run.');
+        addLog('Ambulance exited. Complete intake for the next run.');
         update({
           isSimulationRunning: false,
           ambulancePosition: { x: AMB_START_X, y: 0.5, z: AMB_LANE_Z, rotation: -Math.PI / 2 },

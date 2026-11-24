@@ -7,295 +7,88 @@ import { useTrafficSignal } from '../../hooks/useTrafficSignal';
 import { useCase3TrafficStream } from '../../hooks/useCase3TrafficStream';
 import { useHardwareSerial } from '../../hooks/useHardwareSerial';
 import { useHardwareWifi } from '../../hooks/useHardwareWifi';
+import CoordinationQueue from '../../components/CoordinationQueue';
+import OperationsHeader from '../../components/OperationsHeader';
+import { ArrowUpRight, Route, GitBranch, Timer, MapPin } from 'lucide-react';
 import { Canvas3D } from '../../components/Canvas3D';
 
-function Case1SignalHUD({ phase, nGreen, sGreen, eGreen, wGreen, nYellow, sYellow, eYellow, wYellow, timeRemaining, onBackToMenu, onSwitchCase }) {
-  const phaseLabel = {
-    ALL_RED:      { text: 'ALL APPROACHES - GRIDLOCK',      color: '#ef4444', sub: 'Press ENTER to dispatch ambulance' },
-    W_GREEN:      { text: 'EMERGENCY - WEST CORRIDOR OPEN', color: '#f97316', sub: 'Ambulance en route - N/S/E holding' },
-    N_RELEASE:    { text: 'NORTH RELEASED',                 color: '#22c55e', sub: 'S/E/W holding' },
-    S_RELEASE:    { text: 'SOUTH RELEASED',                 color: '#22c55e', sub: 'E/W holding' },
-    E_RELEASE:    { text: 'EAST RELEASED',                  color: '#22c55e', sub: 'Resuming normal cycle' },
-    NORMAL_CYCLE: { text: 'NORMAL CYCLE',                   color: '#60a5fa', sub: 'Standard signal rotation active' },
-  };
-  const p = phaseLabel[phase] || { text: phase, color: '#fff', sub: '' };
-  const arms = [
-    { label: 'NORTH', green: nGreen, yellow: nYellow },
-    { label: 'EAST',  green: eGreen, yellow: eYellow },
-    { label: 'SOUTH', green: sGreen, yellow: sYellow },
-    { label: 'WEST',  green: wGreen, yellow: wYellow },
-  ];
-  return (
-    <div style={{ position:'fixed',top:20,left:20,zIndex:100,background:'rgba(2,6,23,0.92)',border:`1.5px solid ${p.color}`,borderRadius:12,padding:'12px 18px',fontFamily:'monospace',minWidth:260,boxShadow:`0 0 20px ${p.color}44`,backdropFilter:'blur(10px)' }}>
-      <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8,borderBottom:'1px solid #334155',paddingBottom:6 }}>
-        <button
-          onClick={onBackToMenu}
-          style={{ background:'#1e293b',color:'#94a3b8',border:'1px solid #475569',borderRadius:6,fontSize:10,padding:'2px 8px',cursor:'pointer',fontWeight:700 }}
-        >
-          ← MENU
-        </button>
-        <span style={{ fontSize:10,color:'#94a3b8',letterSpacing:2 }}>CASE 01 PREEMPTION</span>
-        <button
-          onClick={() => onSwitchCase(3)}
-          style={{ background:'rgba(245,158,11,0.2)',color:'#f59e0b',border:'1px solid #f59e0b',borderRadius:6,fontSize:10,padding:'2px 8px',cursor:'pointer',fontWeight:700 }}
-        >
-          CASE 03
-        </button>
-      </div>
-      <div style={{ fontSize:14,fontWeight:700,color:p.color,marginBottom:2 }}>{p.text}</div>
-      <div style={{ fontSize:11,color:'#64748b',marginBottom:8 }}>{p.sub}</div>
-      {(phase==='N_RELEASE'||phase==='S_RELEASE'||phase==='E_RELEASE')&&(
-        <div style={{ display:'flex',alignItems:'center',gap:8,marginBottom:8 }}>
-          <span style={{ fontSize:11,color:'#64748b' }}>NEXT IN</span>
-          <span style={{ fontSize:22,fontWeight:900,color:p.color }}>{timeRemaining}s</span>
-        </div>
-      )}
-      <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:4,fontSize:11 }}>
-        {arms.map(({label,green,yellow})=>{
-          const icon=green?'🟢':yellow?'🟡':'🔴';
-          const col=green?'#22c55e':yellow?'#facc15':'#ef4444';
-          return(<div key={label} style={{color:col,display:'flex',gap:4,alignItems:'center'}}><span>{icon}</span><span style={{color:'#94a3b8'}}>{label}</span></div>);
-        })}
-      </div>
-    </div>
-  );
+function TwinPanel({ id, title, onBackToMenu, onSwitchCase, children }) {
+  return <aside className="twin-card twin-instrument">
+    <div className="instrument-nav"><button onClick={onBackToMenu}>← Overview</button>
+      <button onClick={() => onSwitchCase(id === 1 ? 3 : 1)}>Switch case ↗</button></div>
+    <small>Simulation desk · Case 0{id}</small><h1>{title}</h1>{children}
+  </aside>;
 }
 
-function Case3TelemetryHUD({ case3, onBackToMenu, onSwitchCase }) {
-  const { ambulanceA, ambulanceB, deadlockDetected, trafficCycleActive, signals, metrics } = case3;
+function ArmSignals({ signals }) {
+  return <div className="instrument-signals">{[['North','s'],['East','w'],['South','n'],['West','e']].map(([label, arm]) => {
+    const phase = signals[arm + 'Green'] ? 'Open' : signals[arm + 'Yellow'] ? 'Changing' : 'Hold';
+    return <div key={label}><span>{label}</span><b data-phase={phase}>{phase}</b></div>;
+  })}</div>;
+}
 
-  const arms = [
-    { label: 'NORTH', green: signals.sGreen, yellow: signals.sYellow },
-    { label: 'EAST',  green: signals.wGreen, yellow: signals.wYellow },
-    { label: 'SOUTH', green: signals.nGreen, yellow: signals.nYellow },
-    { label: 'WEST',  green: signals.eGreen, yellow: signals.eYellow },
-  ];
+function Case1SignalHUD({ signals, stream, start, dispatch, onBackToMenu, onSwitchCase }) {
+  const phase = signals.phase.replaceAll('_', ' ').toLowerCase();
+  return <TwinPanel id={1} title="Ambulance priority" onBackToMenu={onBackToMenu} onSwitchCase={onSwitchCase}>
+    <p className="instrument-note">M.G. Road · west approach</p>
+    <CoordinationQueue className="instrument-dispatch" start={start} currentDispatchId={dispatch?.id} busy={stream.isSimulationRunning}/>
+    <div className="instrument-stat"><span>Signal phase</span><strong>{phase}</strong></div>
+    <ArmSignals signals={signals}/>
+    {signals.phase.includes('RELEASE') && <div className="instrument-stat"><span>Next phase</span><strong>{signals.timeRemaining} s</strong></div>}
+  </TwinPanel>;
+}
 
-  return (
-    <div style={{
-      position: 'fixed',
-      top: 20,
-      left: 20,
-      zIndex: 100,
-      background: 'rgba(2, 6, 23, 0.94)',
-      border: `1.5px solid ${trafficCycleActive ? '#22c55e' : '#f59e0b'}`,
-      borderRadius: 12,
-      padding: '14px 18px',
-      fontFamily: 'monospace',
-      width: 350,
-      boxShadow: `0 0 24px ${trafficCycleActive ? 'rgba(34, 197, 94, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
-      backdropFilter: 'blur(10px)',
-      transition: 'border-color 0.3s ease, box-shadow 0.3s ease'
-    }}>
-      {/* Top Header / Nav */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, borderBottom: '1px solid #334155', paddingBottom: 6 }}>
-        <button
-          onClick={onBackToMenu}
-          style={{
-            background: '#1e293b',
-            color: '#94a3b8',
-            border: '1px solid #475569',
-            borderRadius: 6,
-            fontSize: 10,
-            padding: '2px 8px',
-            cursor: 'pointer',
-            fontWeight: 700
-          }}
-        >
-          ← MENU
-        </button>
-        <span style={{ fontSize: 11, color: trafficCycleActive ? '#22c55e' : '#f59e0b', fontWeight: 800, letterSpacing: 2 }}>
-          {trafficCycleActive ? 'CASE 03: NORMAL TRAFFIC' : 'CASE 03: MACRO-DETOUR'}
-        </span>
-        <button
-          onClick={() => onSwitchCase(1)}
-          style={{
-            background: 'rgba(34, 197, 94, 0.15)',
-            color: '#22c55e',
-            border: '1px solid #22c55e',
-            borderRadius: 6,
-            fontSize: 10,
-            padding: '2px 8px',
-            cursor: 'pointer',
-            fontWeight: 700
-          }}
-        >
-          CASE 01
-        </button>
-      </div>
-
-      {/* Dispatch / Re-dispatch Button */}
-      <button
-        onClick={case3.dispatchCase3}
-        style={{
-          width: '100%',
-          background: (case3.isSimulationRunning && !trafficCycleActive)
-            ? 'rgba(30, 41, 59, 0.8)'
-            : 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
-          color: (case3.isSimulationRunning && !trafficCycleActive) ? '#94a3b8' : '#000',
-          fontWeight: 900,
-          fontSize: 11,
-          padding: '7px 0',
-          borderRadius: 8,
-          border: (case3.isSimulationRunning && !trafficCycleActive) ? '1px solid #334155' : '1px solid #f59e0b',
-          cursor: (case3.isSimulationRunning && !trafficCycleActive) ? 'default' : 'pointer',
-          letterSpacing: 1.2,
-          marginBottom: 10,
-          boxShadow: (case3.isSimulationRunning && !trafficCycleActive) ? 'none' : '0 0 16px rgba(245, 158, 11, 0.45)',
-          transition: 'all 0.2s ease'
-        }}
-      >
-        {trafficCycleActive
-          ? '🔄 RE-DISPATCH DUAL AMBULANCES [ENTER]'
-          : case3.isSimulationRunning
-          ? '🚑 AMBULANCES IN MOTION'
-          : '▶ DISPATCH DUAL AMBULANCES [ENTER]'}
-      </button>
-
-      {/* ── CONDITIONAL PANEL: Normal Traffic Orchestration (Case 1 style) vs Emergency Tracking ── */}
-      {trafficCycleActive ? (
-        <div style={{ background: 'rgba(15, 23, 42, 0.9)', border: '1px solid #22c55e', borderRadius: 8, padding: '10px 12px', marginBottom: 10 }}>
-          <div style={{ fontSize: 10, color: '#22c55e', fontWeight: 800, letterSpacing: 1.5, marginBottom: 4 }}>
-            TRAFFIC ORCHESTRATION ACTIVE
-          </div>
-          <div style={{ fontSize: 12, fontWeight: 800, color: '#f8fafc', marginBottom: 4, lineHeight: 1.3 }}>
-            {signals.phaseLabel}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, marginTop: 4 }}>
-            <span style={{ fontSize: 10, color: '#94a3b8' }}>PHASE TIMER:</span>
-            <span style={{ fontSize: 20, fontWeight: 900, color: '#22c55e' }}>{signals.timeRemaining}s</span>
-          </div>
-
-          {/* 4-Arm Live Signal Status Matrix */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: 11, borderTop: '1px solid #334155', paddingTop: 8 }}>
-            {arms.map(({ label, green, yellow }) => {
-              const icon = green ? '🟢' : yellow ? '🟡' : '🔴';
-              const col  = green ? '#22c55e' : yellow ? '#facc15' : '#ef4444';
-              return (
-                <div key={label} style={{ color: col, display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <span>{icon}</span>
-                  <span style={{ color: '#cbd5e1', fontWeight: 600 }}>{label}</span>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Delivery Confirmation */}
-          <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px solid #334155', fontSize: 9, color: '#64748b', display: 'flex', justifyContent: 'space-between' }}>
-            <span>AMB A: <strong style={{ color: '#22c55e' }}>DELIVERED</strong></span>
-            <span>AMB B: <strong style={{ color: '#22c55e' }}>DELIVERED</strong></span>
-          </div>
-        </div>
-      ) : (
-        <>
-          {/* Ambulance A Status Card */}
-          <div style={{ background: 'rgba(30, 41, 59, 0.7)', border: '1px solid #3b82f6', borderRadius: 8, padding: '8px 10px', marginBottom: 8 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, fontWeight: 700, color: '#60a5fa' }}>
-              <span>🚑 AMBULANCE A (CARDIAC)</span>
-              <span style={{ color: ambulanceA.status === 'CORRIDOR_ACTIVE' ? '#22c55e' : '#94a3b8' }}>
-                {ambulanceA.status}
-              </span>
-            </div>
-            <div style={{ fontSize: 11, color: '#e2e8f0', marginTop: 3 }}>
-              South Approach (X: {ambulanceA.position.x.toFixed(1)}, Z: {ambulanceA.position.z.toFixed(1)})
-            </div>
-            <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
-              Junction Status: <strong style={{ color: '#22c55e' }}>SOUTH GREEN (DIRECT FLUSH)</strong>
-            </div>
-          </div>
-
-          {/* Ambulance B Detour Card */}
-          <div style={{ background: 'rgba(30, 41, 59, 0.7)', border: '1px solid #f59e0b', borderRadius: 8, padding: '8px 10px', marginBottom: 10 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, fontWeight: 700, color: '#f59e0b' }}>
-              <span>🚑 AMBULANCE B (TRAUMA)</span>
-              <span style={{ color: ambulanceB.status === 'DETOUR_ACTIVE' ? '#f59e0b' : '#94a3b8' }}>
-                {ambulanceB.status}
-              </span>
-            </div>
-            <div style={{ fontSize: 11, color: '#fef08a', marginTop: 3, fontWeight: 600 }}>
-              {ambulanceB.waypointName}
-            </div>
-            <div style={{ fontSize: 10, color: '#cbd5e1', marginTop: 2 }}>
-              TELEMETRY: X: <strong style={{ color: '#fff' }}>{ambulanceB.position.x.toFixed(1)}</strong> | Z: <strong style={{ color: '#fff' }}>{ambulanceB.position.z.toFixed(1)}</strong>
-            </div>
-            
-            {/* Progress Waypoint Pills */}
-            <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
-              {[
-                { id: 1, label: 'WP1 (X:47)' },
-                { id: 2, label: 'WP2 (Z:-60)' },
-                { id: 3, label: 'WP3 (X:-85)' },
-                { id: 4, label: 'WP4 (Rejoin)' },
-              ].map(wp => {
-                const active = ambulanceB.currentWaypointIdx === wp.id;
-                const done = ambulanceB.currentWaypointIdx > wp.id;
-                return (
-                  <div key={wp.id} style={{
-                    flex: 1,
-                    textAlign: 'center',
-                    padding: '3px 0',
-                    borderRadius: 4,
-                    fontSize: 8,
-                    fontWeight: 800,
-                    background: done ? '#22c55e' : active ? '#f59e0b' : '#1e293b',
-                    color: done || active ? '#000' : '#64748b',
-                    border: `1px solid ${done ? '#22c55e' : active ? '#f59e0b' : '#334155'}`
-                  }}>
-                    {wp.label}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* AI Comparative Analytics */}
-      <div style={{ background: 'rgba(15, 23, 42, 0.85)', border: '1px solid #334155', borderRadius: 8, padding: '8px 10px', fontSize: 10 }}>
-        <div style={{ color: '#94a3b8', fontWeight: 700, marginBottom: 4, letterSpacing: 1 }}>
-          AI MACRO-DETOUR EFFICIENCY:
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#ef4444', marginBottom: 2 }}>
-          <span>Sequential Junction Flush:</span>
-          <strong>+{metrics.directJunctionDelaySec}s Delay</strong>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#22c55e', marginBottom: 2 }}>
-          <span>North Side-Street Route:</span>
-          <strong>{metrics.macroDetourDurationSec}s Continuous</strong>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#38bdf8', borderTop: '1px solid #334155', paddingTop: 3, fontWeight: 700 }}>
-          <span>Net Clearance Saved:</span>
-          <strong>{metrics.netTimeSavedSec}s (-62.5%)</strong>
-        </div>
-      </div>
-    </div>
-  );
+function Case3TelemetryHUD({ case3, start, dispatch, onBackToMenu, onSwitchCase }) {
+  const { ambulanceA, ambulanceB, trafficCycleActive, signals, metrics } = case3;
+  return <TwinPanel id={3} title="Dual response" onBackToMenu={onBackToMenu} onSwitchCase={onSwitchCase}>
+    <p className="instrument-note">Brigade corridor · Cubbon detour</p>
+    <CoordinationQueue className="instrument-dispatch" start={start} currentDispatchId={dispatch?.id} busy={case3.isSimulationRunning && !trafficCycleActive}/>
+    {trafficCycleActive ? <><div className="instrument-stat"><span>Both units delivered</span><strong>{signals.timeRemaining} s</strong></div><p>{signals.phaseLabel}</p><ArmSignals signals={signals}/></> :
+      [ambulanceA, ambulanceB].map((unit, i) => <section className="instrument-unit" key={unit.id}>
+        <div><strong>{i ? 'Unit B · Trauma' : 'Unit A · Cardiac'}</strong><small>{unit.status.replaceAll('_',' ').toLowerCase()}</small></div>
+        <p>{i ? unit.waypointName : 'Brigade Road · south approach'}</p>
+        <small>X {unit.position.x.toFixed(1)}　Z {unit.position.z.toFixed(1)}{i ? '　Leg ' + (unit.currentWaypointIdx + 1) + ' / 5' : ''}</small>
+      </section>)}
+    <details className="instrument-details"><summary>Detour comparison</summary>
+      {[['Direct junction delay', metrics.directJunctionDelaySec],['Detour duration', metrics.macroDetourDurationSec],['Clearance saved', metrics.netTimeSavedSec]].map(([label,value]) =>
+        <div className="instrument-stat" key={label}><span>{label}</span><strong>{value} s</strong></div>)}</details>
+  </TwinPanel>;
 }
 
 export default function Dashboard() {
   const [started, setStarted] = useState(false);
   const [selectedCase, setSelectedCase] = useState(1);
+  const [dispatch, setDispatch] = useState(null);
+  const lastDispatchId = useRef(null);
 
   // Case 1 Hooks
   const case1Stream = useTrafficStream(selectedCase === 1);
   const case1Signal = useTrafficSignal();
 
   // Case 3 Hook
-  const case3 = useCase3TrafficStream();
+  const case3 = useCase3TrafficStream(selectedCase === 3);
 
   const vehiclesRef = useRef([]);
+
+  const startDispatch = useCallback(record => {
+    if (lastDispatchId.current === record.id) return;
+    const active = record.caseId === 1 ? case1Stream.isSimulationRunning :
+      case3.isSimulationRunning && !case3.trafficCycleActive;
+    if (active) throw new Error('A dispatch is already active in this scenario.');
+    lastDispatchId.current = record.id;
+    setDispatch(record);
+    setSelectedCase(record.caseId);
+    setStarted(true);
+    if (record.caseId === 1) case1Stream.dispatchCase1();
+    else case3.dispatchCase3();
+  }, [case1Stream, case3]);
 
   const handleRemoteCommand = useCallback((command, payload) => {
     if ((command === 'SWITCH_CASE' || command === 'SET_CASE') && (payload.caseId || payload.caseNumber)) {
       setSelectedCase(payload.caseId || payload.caseNumber);
       setStarted(true);
-    } else if (command === 'DISPATCH') {
-      setStarted(true);
-      if (selectedCase === 1) {
-        case1Stream.dispatchCase1?.();
-      } else {
-        case3.dispatchCase3?.();
-      }
+    } else if (command === 'DISPATCH' && payload.dispatch) {
+      try { startDispatch(payload.dispatch); } catch (error) { console.warn(error.message); }
     } else if (command === 'NORMAL_CYCLE') {
       if (selectedCase === 1) {
         case1Signal.onNormalCycle?.();
@@ -303,9 +96,11 @@ export default function Dashboard() {
     } else if (command === 'FREEZE') {
       if (selectedCase === 1) {
         case1Stream.toggleFreeze?.();
+      } else {
+        case3.toggleFreeze();
       }
     }
-  }, [selectedCase, case1Stream, case1Signal, case3]);
+  }, [selectedCase, case1Stream, case1Signal, case3, startDispatch]);
 
   // ESP32 Web Serial Hardware Synchronization (Zero-Fail Fallback)
   const {
@@ -338,9 +133,9 @@ export default function Dashboard() {
   const [showPhoneQrModal, setShowPhoneQrModal] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [networkInfo, setNetworkInfo] = useState({
-    ip: '10.157.193.41',
-    driverUrl: 'http://10.157.193.41:3000/driver',
-    ambulanceUrl: 'http://10.157.193.41:3000/ambulance',
+    ip: '',
+    driverUrl: '',
+    ambulanceUrl: '',
   });
 
   useEffect(() => {
@@ -349,7 +144,11 @@ export default function Dashboard() {
       .then(data => {
         if (data?.ip) setNetworkInfo(data);
       })
-      .catch(() => {});
+      .catch(() => setNetworkInfo({
+        ip: window.location.hostname,
+        driverUrl: new URL('/driver', window.location.origin).href,
+        ambulanceUrl: new URL('/ambulance', window.location.origin).href,
+      }));
   }, []);
 
   // Live 20Hz V2X Telemetry Broadcaster to /ambulance and /driver dashboards
@@ -358,12 +157,14 @@ export default function Dashboard() {
     case1Stream,
     case1Signal,
     case3,
+    vehiclesRef,
     espIp,
     isWifiEnabled,
     lastWifiByteSent,
     serialLastByte,
     isSerialConnected,
     onRemoteCommand: handleRemoteCommand,
+    dispatch: dispatch?.caseId === selectedCase ? dispatch : null,
   });
   const [tempIp, setTempIp] = useState(espIp);
 
@@ -444,78 +245,38 @@ export default function Dashboard() {
     sendWifiCommand
   ]);
 
-  const cases = [
-    {
-      id: 1,
-      label: 'CASE 01',
-      title: 'Ambulance Priority Preemption',
-      description: 'BLE-triggered emergency vehicle preemption at a 4-way intersection. The traffic signal system yields a green corridor for an incoming ambulance, while all other directions are held at red.',
-      tags: ['4-Way Signal Control', 'BLE Preemption', 'Real-Time Traffic'],
-      color: '#22c55e',
-      available: true
-    },
-    {
-      id: 2,
-      label: 'CASE 02',
-      title: 'Adaptive Signal Timing',
-      description: 'AI-powered signal timing that dynamically adjusts green phase durations based on real-time vehicle queue density detected on each arm of the intersection.',
-      tags: ['Queue Detection', 'AI Optimization', 'Dynamic Timing'],
-      color: '#60a5fa',
-      available: false
-    },
-    {
-      id: 3,
-      label: 'CASE 03',
-      title: 'Dual-Ambulance Conflict & Macro-Detour',
-      description: 'Two equal-priority emergency vehicles converge at the central junction simultaneously. AI detects deadlock, grants Ambulance A the South corridor right-of-way, and dynamically reroutes Ambulance B through the North block side streets to prevent city gridlock.',
-      tags: ['Deadlock Detection', 'Macro-Detour', 'Dual BLE Priority', 'Side-Street Routing'],
-      color: '#f59e0b',
-      available: true
-    },
-  ];
-
   if (!started) {
-    return (
-      <div style={{ minHeight:'100vh',background:'radial-gradient(ellipse at 50% 0%,#0f2027 0%,#020617 60%)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'40px 20px',fontFamily:"'Courier New',monospace" }}>
-        <div style={{ textAlign:'center',marginBottom:48 }}>
-          <div style={{ fontSize:11,letterSpacing:6,color:'#64748b',marginBottom:8 }}>DIGITAL TWIN COMMAND DASHBOARD</div>
-          <h1 style={{ fontSize:'clamp(2rem,5vw,3.5rem)',fontWeight:900,color:'#22c55e',letterSpacing:'0.25em',margin:0,textShadow:'0 0 40px rgba(34,197,94,0.4)' }}>SEMTOS CMD</h1>
-          <p style={{ color:'#475569',fontSize:13,marginTop:10,maxWidth:480,lineHeight:1.7 }}>Select a simulation case to initialize the 3D digital twin environment.</p>
-        </div>
-        <div style={{ display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(280px,1fr))',gap:24,width:'100%',maxWidth:1000 }}>
-          {cases.map((c)=>(
-            <div key={c.id} onClick={()=>{
-                if (c.available) {
-                  setSelectedCase(c.id);
-                  setStarted(true);
-                }
-              }}
-              style={{ background:c.available?`linear-gradient(135deg,rgba(2,6,23,0.95) 0%,rgba(${c.id===1?'34,197,94':c.id===2?'96,165,250':'245,158,11'},0.08) 100%)`:'rgba(2,6,23,0.6)',border:`1.5px solid ${c.available?c.color:'#1e293b'}`,borderRadius:16,padding:'28px 24px',cursor:c.available?'pointer':'not-allowed',position:'relative',transition:'transform 0.2s,box-shadow 0.2s',boxShadow:c.available?`0 0 32px ${c.color}22,0 4px 24px rgba(0,0,0,0.5)`:'0 4px 24px rgba(0,0,0,0.4)',opacity:c.available?1:0.55,overflow:'hidden' }}
-              onMouseEnter={e=>{if(c.available){e.currentTarget.style.transform='translateY(-4px)';e.currentTarget.style.boxShadow=`0 0 48px ${c.color}44,0 8px 32px rgba(0,0,0,0.6)`;}}}
-              onMouseLeave={e=>{e.currentTarget.style.transform='translateY(0)';e.currentTarget.style.boxShadow=c.available?`0 0 32px ${c.color}22,0 4px 24px rgba(0,0,0,0.5)`:'0 4px 24px rgba(0,0,0,0.4)';}}
-            >
-              {!c.available&&<div style={{ position:'absolute',top:16,right:16,background:'#1e293b',color:'#64748b',fontSize:9,letterSpacing:2,padding:'3px 10px',borderRadius:20,border:'1px solid #334155' }}>COMING SOON</div>}
-              {c.available&&<div style={{ position:'absolute',top:16,right:16,display:'flex',alignItems:'center',gap:5 }}><div style={{ width:7,height:7,borderRadius:'50%',background:c.color,boxShadow:`0 0 8px ${c.color}`,animation:'pulse 2s infinite' }}/><span style={{ fontSize:9,letterSpacing:2,color:c.color }}>READY</span></div>}
-              <div style={{ fontSize:10,letterSpacing:4,color:c.color,marginBottom:12,opacity:0.8 }}>{c.label}</div>
-              <h2 style={{ fontSize:18,fontWeight:700,color:c.available?'#f1f5f9':'#475569',margin:'0 0 12px 0',lineHeight:1.3 }}>{c.title}</h2>
-              <p style={{ fontSize:12,color:c.available?'#94a3b8':'#334155',lineHeight:1.7,margin:'0 0 20px 0' }}>{c.description}</p>
-              <div style={{ display:'flex',flexWrap:'wrap',gap:6,marginBottom:24 }}>
-                {c.tags.map(tag=>(<span key={tag} style={{ fontSize:9,letterSpacing:1,padding:'3px 8px',borderRadius:4,background:c.available?`${c.color}15`:'rgba(30,41,59,0.5)',color:c.available?c.color:'#334155',border:`1px solid ${c.available?`${c.color}30`:'#1e293b'}` }}>{tag}</span>))}
-              </div>
-              <div style={{ padding:'10px 0',borderTop:`1px solid ${c.available?`${c.color}30`:'#1e293b'}`,fontSize:11,letterSpacing:3,color:c.available?c.color:'#334155',fontWeight:700 }}>
-                {c.available?'▶ LAUNCH SIMULATION':'⊘ NOT AVAILABLE'}
-              </div>
-            </div>
-          ))}
-        </div>
-        <p style={{ color:'#1e293b',fontSize:11,marginTop:36,letterSpacing:2 }}>SEMTOS - SMART EMERGENCY MANAGEMENT TRAFFIC OPTIMIZATION SYSTEM</p>
-        <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}`}</style>
-      </div>
-    );
+    const cases = [
+      { id: 1, icon: Route, title: 'Ambulance priority', description: 'Clear the M.G. Road approach for a single emergency vehicle.' },
+      { id: 3, icon: GitBranch, title: 'Dual ambulance response', description: 'Give one unit priority and route the second through Cubbon Road.' },
+      { id: 2, icon: Timer, title: 'Adaptive signals', description: 'Adjust signal timing to the queue on each approach.', pending: true },
+    ];
+    return <main className="operations overview">
+      <OperationsHeader/>
+      <div className="overview-content">
+        <section className="atlas-hero"><div className="atlas-copy">
+          <span className="kicker"><span className="index-rule"/> Bengaluru, Karnataka</span>
+          <h1>Traffic <br/>operations<span>.</span></h1>
+          <p>Emergency response and signal control along the M.G. Road corridor.</p>
+          <a className="hero-link" href="/driver">Open commuter map <ArrowUpRight size={17}/></a>
+        </div><figure className="atlas-map"><img src="/maps/corridor-atlas.svg" alt="Corridor map linking Brigade junction, Kamaraj Road and Central Street"/>
+          <figcaption><MapPin size={13}/> Central Bengaluru <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a></figcaption></figure></section>
+        <div className="overview-grid"><section className="scenarios"><div className="section-heading"><h2>Simulation desk</h2><span>3D digital twin</span></div>
+          {cases.map(({ id, icon: Icon, title, description, pending }) => <button key={id} className="case-row" disabled={pending}
+            onClick={() => {setSelectedCase(id);setStarted(true);}}>
+            <i className="case-symbol"><Icon size={22}/></i><span className="case-info"><small>Case 0{id}</small><strong>{title}</strong><span>{description}</span></span>
+            {pending ? <small>Planned</small> : <ArrowUpRight size={19}/>}
+          </button>)}</section>
+          <section className="field-views"><div className="section-heading"><h2>Field views</h2></div>
+            <CoordinationQueue className="primary-action overview-queue" start={startDispatch} currentDispatchId={dispatch?.id} busy={case1Stream.isSimulationRunning || (case3.isSimulationRunning && !case3.trafficCycleActive)}/>
+            <a href="/driver"><span><small>For commuters</small><strong>Live traffic map</strong></span><ArrowUpRight size={19}/></a>
+            <a href="/ambulance"><span><small>For response units</small><strong>Ambulance desk</strong></span><ArrowUpRight size={19}/></a>
+          </section></div>
+      </div></main>;
   }
 
   return (
-    <main className="relative w-screen h-screen overflow-hidden bg-black text-slate-200 font-sans">
+    <main className="twin-studio relative w-screen h-screen overflow-hidden bg-black text-slate-200 font-sans">
       <div className="absolute inset-0 z-0">
         <Canvas3D
           selectedCase={selectedCase}
@@ -540,92 +301,12 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* Top Deadlock Notification Alert Banner for Case 3 */}
-      {selectedCase === 3 && case3.deadlockDetected && !case3.trafficCycleActive && (
-        <div style={{
-          position: 'fixed',
-          top: 20,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 110,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: 6,
-          pointerEvents: 'none'
-        }}>
-          <div style={{
-            background: 'rgba(220, 38, 38, 0.95)',
-            border: '2px solid #ef4444',
-            boxShadow: '0 0 35px rgba(239, 68, 68, 0.7)',
-            color: '#fff',
-            padding: '10px 24px',
-            borderRadius: 10,
-            fontFamily: 'monospace',
-            fontWeight: 900,
-            fontSize: 14,
-            letterSpacing: 1.5,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12,
-            animation: 'pulse 1.2s infinite'
-          }}>
-            <span style={{ fontSize: 18 }}>⚠️</span>
-            <span>DEADLOCK DETECTED: AMBULANCE B REROUTING VIA NORTH BLOCK</span>
-            <span style={{ fontSize: 18 }}>🔄</span>
-          </div>
-          <div style={{
-            background: 'rgba(2, 6, 23, 0.90)',
-            border: '1px solid #f59e0b',
-            color: '#fcd34d',
-            padding: '3px 14px',
-            borderRadius: 20,
-            fontSize: 11,
-            fontFamily: 'monospace',
-            letterSpacing: 1
-          }}>
-            AMBULANCE A CORRIDOR RIGHT-OF-WAY • AMBULANCE B MACRO-DETOUR ACTIVE
-          </div>
-        </div>
-      )}
-
-      {/* Top Post-Clearance Orchestration Success Banner for Case 3 */}
-      {selectedCase === 3 && case3.trafficCycleActive && (
-        <div style={{
-          position: 'fixed',
-          top: 20,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 110,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: 6,
-          pointerEvents: 'none'
-        }}>
-          <div style={{
-            background: 'rgba(5, 150, 105, 0.95)',
-            border: '2px solid #10b981',
-            boxShadow: '0 0 32px rgba(16, 185, 129, 0.55)',
-            color: '#fff',
-            padding: '8px 24px',
-            borderRadius: 10,
-            fontFamily: 'monospace',
-            fontWeight: 800,
-            fontSize: 13,
-            letterSpacing: 1.2,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10
-          }}>
-            <span style={{ fontSize: 16 }}>✅</span>
-            <span>AMBULANCES DELIVERED • NORMAL TRAFFIC ORCHESTRATION ACTIVE</span>
-          </div>
-        </div>
-      )}
+      {selectedCase === 3 && (case3.deadlockDetected || case3.trafficCycleActive) &&
+        <div role="status" className="twin-announcement">{case3.trafficCycleActive ?
+          'Both units delivered · Normal signal cycle resumed' : 'Junction conflict · Unit B diverted via Cubbon Road'}</div>}
 
       {/* ── Top-Right Hardware Control Bar (Dual USB Serial & Wi-Fi V2I) ── */}
-      <div style={{
+      <div className="twin-toolbar" style={{
         position: 'fixed',
         top: 20,
         right: 20,
@@ -656,7 +337,7 @@ export default function Dashboard() {
           }}
         >
           <span>🚑</span>
-          <span>2D GOOGLE MAPS COCKPIT</span>
+          <span>Ambulance desk</span>
         </a>
 
         {/* Launch Commuter Phone Alert HUD (Scan QR) */}
@@ -689,7 +370,7 @@ export default function Dashboard() {
           }}
         >
           <span>📱</span>
-          <span>PHONE HUD [SCAN QR]</span>
+          <span>Phone link</span>
         </button>
 
         {/* USB Serial Indicator / Button */}
@@ -724,7 +405,7 @@ export default function Dashboard() {
             }}
           >
             <span>🔌</span>
-            <span>USB SERIAL</span>
+            <span>USB serial</span>
           </button>
         ) : (
           <div style={{
@@ -874,7 +555,7 @@ export default function Dashboard() {
 
         {/* ── EXPANDABLE HARDWARE CONFIGURATION CARD ── */}
         {showHardwareMenu && (
-          <div style={{
+          <div className="hardware-panel" style={{
             position: 'absolute',
             top: 48,
             right: 0,
@@ -1053,22 +734,18 @@ export default function Dashboard() {
       {/* Primary HUD depending on selected case */}
       {selectedCase === 1 ? (
         <Case1SignalHUD
-          phase={case1Signal.phase}
-          nGreen={case1Signal.nGreen}
-          sGreen={case1Signal.sGreen}
-          eGreen={case1Signal.eGreen}
-          wGreen={case1Signal.wGreen}
-          nYellow={case1Signal.nYellow}
-          sYellow={case1Signal.sYellow}
-          eYellow={case1Signal.eYellow}
-          wYellow={case1Signal.wYellow}
-          timeRemaining={case1Signal.timeRemaining}
+          signals={case1Signal}
+          stream={case1Stream}
+          dispatch={dispatch}
+          start={startDispatch}
           onBackToMenu={() => setStarted(false)}
           onSwitchCase={(caseId) => setSelectedCase(caseId)}
         />
       ) : (
         <Case3TelemetryHUD
           case3={case3}
+          start={startDispatch}
+          dispatch={dispatch?.caseId === 3 ? dispatch : null}
           onBackToMenu={() => setStarted(false)}
           onSwitchCase={(caseId) => setSelectedCase(caseId)}
         />
@@ -1088,7 +765,7 @@ export default function Dashboard() {
         }}
         onClick={() => setShowPhoneQrModal(false)}
         >
-          <div style={{
+          <div role="dialog" aria-label="Open commuter map on your phone" className="phone-dialog" style={{
             background: 'rgba(15, 23, 42, 0.96)',
             border: '1.5px solid #f59e0b',
             borderRadius: 16,
@@ -1123,10 +800,10 @@ export default function Dashboard() {
             </button>
 
             <div style={{ fontSize: 11, color: '#f59e0b', fontWeight: 800, letterSpacing: 2 }}>
-              V2X MOBILE COMMUTER COCKPIT
+              COMMUTER MAP
             </div>
             <div style={{ fontSize: 16, fontWeight: 900, color: '#f8fafc' }}>
-              📱 Open HUD on Your Phone
+              Open on your phone
             </div>
 
             {/* QR Code Canvas/Image */}

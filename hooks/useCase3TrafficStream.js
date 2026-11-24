@@ -26,7 +26,7 @@ const DETOUR_WAYPOINTS = [
   { id: 4, name: 'Main Avenue Re-entry',    triggerAxis: 'z', triggerVal: -2.89, condition: '>=', targetRot: Math.PI / 2,  nextDir: 'W' },
 ];
 
-export function useCase3TrafficStream() {
+export function useCase3TrafficStream(isActive) {
   const [state, setState] = useState({
     ambulanceA: {
       id: 'AMB_A',
@@ -112,6 +112,7 @@ export function useCase3TrafficStream() {
   const dispatchCase3 = useCallback(() => {
     if (simRunningRef.current && !trafficCycleActiveRef.current) return;
     simRunningRef.current = true;
+    isFrozenRef.current = false;
     trafficCycleActiveRef.current = false;
     cycleArmIndexRef.current = 0;
     cycleTimerRef.current = 15.0;
@@ -122,13 +123,14 @@ export function useCase3TrafficStream() {
     posBRef.current = { x: AMB_B_START_X, y: 0.55, z: AMB_B_LANE_Z, rotation: Math.PI / 2 };
 
     addLog('Dual dispatch triggered: Ambulance A (South) & Ambulance B (East) en route.', 'warning');
-    addLog('AI CONFLICT DETECTOR: Equal priority emergency convergence at Junction (0,0)!', 'danger');
+    addLog('Two emergency units are approaching the junction.', 'danger');
     addLog('DEADLOCK RESOLVED: Ambulance A granted South Green Corridor. Ambulance B assigned Macro-Detour via North Block.', 'success');
 
     setState(prev => ({
       ...prev,
       trafficCycleActive: false,
       isSimulationRunning: true,
+      isFrozen: false,
       deadlockDetected: true,
       signals: {
         phase: 'S_GREEN_CORRIDOR',
@@ -160,17 +162,19 @@ export function useCase3TrafficStream() {
     }));
   }, [addLog]);
 
+  const toggleFreeze = useCallback(() => {
+    isFrozenRef.current = !isFrozenRef.current;
+    setState(prev => ({ ...prev, isFrozen: isFrozenRef.current }));
+    addLog(`System ${isFrozenRef.current ? 'PAUSED' : 'RESUMED'}.`);
+  }, [addLog]);
+
   // Key listeners for Case 3
   useEffect(() => {
+    if (!isActive) return;
     const handleKeyDown = (e) => {
-      if (e.code === 'Enter') {
-        e.preventDefault();
-        dispatchCase3();
-      }
+      if (e.target?.closest?.('input, textarea, select, dialog, [contenteditable]')) return;
       if (e.code === 'KeyF') {
-        isFrozenRef.current = !isFrozenRef.current;
-        setState(prev => ({ ...prev, isFrozen: isFrozenRef.current }));
-        addLog(`System ${isFrozenRef.current ? 'PAUSED' : 'RESUMED'}.`);
+        toggleFreeze();
       }
       if (e.code === 'Digit1') {
         setState(prev => ({ ...prev, activeCamFollow: 'corridor' }));
@@ -185,14 +189,14 @@ export function useCase3TrafficStream() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [dispatchCase3, addLog]);
+  }, [isActive, toggleFreeze]);
 
   // ── Main simulation tick loop (50ms physics / 200ms HUD throttle) ───────────
   // The ref-based position values (posARef, posBRef) update every 50ms tick for
   // smooth 3D motion.  React setState is throttled to 200ms (5Hz) so the component
   // tree only re-renders 5× per second instead of 20×, eliminating micro-stutters.
   useEffect(() => {
-    addLog('Case 03 initialized. Press [ENTER] to dispatch converging ambulances.');
+    addLog('Case 03 initialized. Complete ambulance intake to dispatch.');
 
     let lastHudUpdate = 0; // timestamp of last setState call (ms)
 
@@ -363,7 +367,7 @@ export function useCase3TrafficStream() {
 
       // Check if both ambulances have cleared their operational zones past the junction
       const ambACleared = currentZA <= -40.0;
-      const ambBCleared = (wpIdx >= 4 || currentXB <= -90.0);
+      const ambBCleared = wpIdx === 4 && currentXB <= -135;
 
       if (ambACleared && ambBCleared && !trafficCycleActiveRef.current) {
         trafficCycleActiveRef.current = true;
@@ -404,6 +408,7 @@ export function useCase3TrafficStream() {
     posARef,
     posBRef,
     dispatchCase3,
+    toggleFreeze,
     setCamFollow,
   };
 }

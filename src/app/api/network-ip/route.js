@@ -5,7 +5,9 @@ import os from 'os';
  * /api/network-ip - Discovers the host laptop's local LAN IPv4 address
  * Enables one-scan mobile phone QR code linking for the Phone HUD (/driver)
  */
-export async function GET() {
+export const dynamic = 'force-dynamic';
+
+export async function GET(request) {
   const interfaces = os.networkInterfaces();
   let candidateIp = '127.0.0.1';
   let wifiIp = null;
@@ -13,7 +15,7 @@ export async function GET() {
   for (const name of Object.keys(interfaces)) {
     for (const iface of interfaces[name] || []) {
       // Skip IPv6 and internal loopback addresses
-      if (iface.family === 'IPv4' && !iface.internal) {
+      if (iface.family === 'IPv4' && !iface.internal && !iface.address.startsWith('169.254.')) {
         const lowerName = name.toLowerCase();
         // Prioritize Wi-Fi / Wireless adapters
         if (lowerName.includes('wi-fi') || lowerName.includes('wireless') || lowerName.includes('wlan')) {
@@ -26,12 +28,14 @@ export async function GET() {
   }
 
   const selectedIp = wifiIp || candidateIp;
+  const url = new URL(request.url);
+  const origin = `http://${selectedIp}${url.port ? `:${url.port}` : ''}`;
 
   return NextResponse.json({
     ok: true,
     ip: selectedIp,
-    driverUrl: `http://${selectedIp}:3000/driver`,
-    ambulanceUrl: `http://${selectedIp}:3000/ambulance`,
-    dashboardUrl: `http://${selectedIp}:3000/`,
+    driverUrl: `${origin}/driver`,
+    ambulanceUrl: `${origin}/ambulance`,
+    dashboardUrl: `${origin}/`,
   });
 }

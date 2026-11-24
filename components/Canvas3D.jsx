@@ -171,7 +171,7 @@ export function FreeRoamFlightCamera() {
   return null;
 }
 
-export function CinematicCamera({ ambulancePosition }) {
+export function CinematicCamera({ ambulancePosition, isSimulationRunning }) {
   const currentLookAt = useRef(new THREE.Vector3(0, 3, 0));
 
   useFrame((state, delta) => {
@@ -179,7 +179,10 @@ export function CinematicCamera({ ambulancePosition }) {
     const targetLookAt = new THREE.Vector3();
 
     // PHASE 1: Fixed corner view watching side-street arrival
-    if (ambulancePosition.x < -80) {
+    if (!isSimulationRunning) {
+      targetPosition.set(-13, 48, 19);
+      targetLookAt.set(0, 0, 0);
+    } else if (ambulancePosition.x < -80) {
       targetPosition.set(-103.50, 3.33, -2.89);
       targetLookAt.set(ambulancePosition.x, 2, ambulancePosition.z);
     } 
@@ -200,8 +203,8 @@ export function CinematicCamera({ ambulancePosition }) {
     }
 
     // Smooth camera position and lookAt interpolation
-    state.camera.position.lerp(targetPosition, delta * 2.0);
-    currentLookAt.current.lerp(targetLookAt, delta * 2.5);
+    state.camera.position.lerp(targetPosition, 1 - Math.exp(-delta * 2));
+    currentLookAt.current.lerp(targetLookAt, 1 - Math.exp(-delta * 2.5));
     state.camera.lookAt(currentLookAt.current);
   });
 
@@ -610,6 +613,7 @@ export function Canvas3D({
 
   useEffect(() => {
     const handleKeyDown = (e) => {
+      if (e.target?.closest?.('input, textarea, select, dialog, [contenteditable]')) return;
       if (e.code === 'KeyV' || e.key === 'v' || e.key === 'V') {
         setIsRoadCam((prev) => !prev);
         setIsFreeRoam(false);
@@ -774,15 +778,15 @@ export function Canvas3D({
             <Case3DetourCamera ambulanceB={ambulanceB} />
           )
         ) : (
-          <CinematicCamera ambulancePosition={ambulancePosition} />
+          <CinematicCamera ambulancePosition={ambulancePosition} isSimulationRunning={isSimulationRunning} />
         )}
       </Canvas>
 
       {/* ── 2D HUD OVERLAYS (Positioned over Canvas) ── */}
-      <div style={{ position: 'fixed', top: '72px', right: '20px', pointerEvents: 'auto', zIndex: 50 }}>
+      <div className="camera-panel" style={{ position: 'fixed', top: '72px', right: '20px', pointerEvents: 'auto', zIndex: 50 }}>
         <div className="bg-black/90 text-emerald-400 p-3 rounded-lg border border-emerald-500 font-mono text-sm whitespace-nowrap shadow-2xl backdrop-blur-md">
           <div className="mb-2 text-xs text-emerald-500 font-bold flex items-center justify-between gap-4">
-            <span>MODE: <span className="text-white font-semibold">{modeLabel}</span></span>
+            <span>View · <span className="text-white font-semibold">{modeLabel}</span></span>
             <button
               onClick={() => {
                 setIsRoadCam(prev => !prev);
@@ -796,7 +800,7 @@ export function Canvas3D({
                   : 'bg-emerald-950/60 text-emerald-300 border-emerald-500/50 hover:bg-emerald-900/80'
               }`}
             >
-              {isRoadCam ? '👁️ CCTV ACTIVE' : '📷 [V] ROAD CAM'}
+              {isRoadCam ? 'Road camera active' : 'Road camera [V]'}
             </button>
           </div>
 
@@ -812,7 +816,7 @@ export function Canvas3D({
                     : 'bg-slate-900 text-amber-300 border-amber-500/40 hover:bg-amber-950/50'
                 }`}
               >
-                [1] DETOUR CAM (AMB B)
+                Unit B · detour
               </button>
               <button
                 onClick={() => setCameraMode('corridor')}
@@ -822,7 +826,7 @@ export function Canvas3D({
                     : 'bg-slate-900 text-blue-300 border-blue-500/40 hover:bg-blue-950/50'
                 }`}
               >
-                [2] CORRIDOR CAM (AMB A)
+                Unit A · corridor
               </button>
               <button
                 onClick={() => setCameraMode('overview')}
@@ -832,13 +836,13 @@ export function Canvas3D({
                     : 'bg-slate-900 text-purple-300 border-purple-500/40 hover:bg-purple-950/50'
                 }`}
               >
-                [3] OVERVIEW
+                Overview
               </button>
             </div>
           )}
 
           <div className="text-xs text-slate-400 mb-1 flex items-center gap-2">
-            <span>[ENTER] Dispatch</span> |
+            
             <span className="cursor-pointer hover:text-white" onClick={() => setIsFreeRoam(prev => !prev)}>[C] Free Roam</span> |
             <span>[F] Freeze</span> |
             <span className="cursor-pointer hover:text-white" onClick={() => setIsRoadCam(prev => !prev)}>[V] Road Cam</span>
