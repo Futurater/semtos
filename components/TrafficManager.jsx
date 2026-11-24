@@ -244,6 +244,7 @@ export function TrafficManager({ selectedCase = 1, ambulancePosition, isPreempte
 
     if (case2) {
       const { phase, northStatus } = case2;
+      const trafficPhase = `${case2.traffic?.index}/${case2.traffic?.stage}`;
       // Substep on slow frames so braking and clearance checks stay consistent.
       let remaining = Math.min(delta, 0.5);
       while (remaining > 0) {
@@ -251,7 +252,8 @@ export function TrafficManager({ selectedCase = 1, ambulancePosition, isPreempte
         stepCase2(case2, step);
         remaining -= step;
       }
-      if (case2.phase !== phase || case2.northStatus !== northStatus) {
+      if (case2.phase !== phase || case2.northStatus !== northStatus ||
+        `${case2.traffic?.index}/${case2.traffic?.stage}` !== trafficPhase) {
         onCase2Change();
       }
     }

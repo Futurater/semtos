@@ -3,12 +3,27 @@ import { Canvas, useFrame } from '@react-three/fiber';
 import { Html, OrbitControls, TransformControls, useGLTF } from '@react-three/drei';
 import { Box3, Vector3 } from 'three';
 import { CityScene } from './CityScene';
+import { captureFreeRoamMouse, FreeRoamFlightCamera } from './Canvas3D';
 import { scenarioRoadHeight } from './case2Simulation';
-import { addScenarioVehicles, HEADINGS, stepScenario, validateScenario } from './scenarioTraffic';
+import { addScenarioVehicles, createSavedDenseFlowScenario, HEADINGS, ONCOMING_FLOW_POLICY, requestAmbulanceBackout, stageScenario, stepScenario } from './scenarioTraffic';
 
 const directions = { N: 'North', E: 'East', S: 'South', W: 'West' };
 const control = 'rounded border border-slate-600 bg-slate-900 px-2.5 py-1.5 text-slate-100 disabled:opacity-40';
 const primary = 'rounded bg-sky-300 px-2.5 py-1.5 font-semibold text-slate-950 disabled:opacity-40';
+const diagnosticPriority = vehicle => vehicle.kind === 'ambulance' ? 0
+  : vehicle.spaceRequest || vehicle.status === 'Yielding' || vehicle.status.endsWith('to open a gap') ? 1 : 2;
+
+function driverStatus(vehicle) {
+  if (vehicle.spaceRequest && vehicle.status === 'Making room for a neighbor') {
+    return `Opening gap for ${vehicle.spaceRequest}`;
+  }
+  if (vehicle.status === 'Yielding' && vehicle.lateralTarget != null) {
+    const forward = HEADINGS[vehicle.heading];
+    const side = vehicle.z * forward.x - vehicle.x * forward.z;
+    return vehicle.lateralTarget > side ? 'Yielding right' : 'Yielding left';
+  }
+  return vehicle.status;
+}
 
 function CoordinateInput({ label, value, onCommit }) {
   return (
@@ -22,12 +37,13 @@ function CoordinateInput({ label, value, onCommit }) {
 }
 
 function snapshot(vehicles) {
-  return vehicles.map(({ id, kind, heading, modelIdx, x, y, z }) => ({
-    id, kind, heading, modelIdx, x, y, z, rotation: HEADINGS[heading].rotation, speed: 0, status: 'Ready',
+  return vehicles.map(({ id, kind, heading, modelIdx, x, y, z, parked }) => ({
+    id, kind, heading, modelIdx, x, y, z, parked, rotation: HEADINGS[heading].rotation, speed: 0,
+    status: parked ? 'Parked obstacle' : 'Ready',
   }));
 }
 
-function ScenarioVehicle({ vehicle, editing, selected, onSelect, onMove }) {
+function ScenarioVehicle({ vehicle, editing, selected, onSelect, onMove, onRotate, rotating }) {
   const group = useRef();
   const ambulance = vehicle.kind === 'ambulance';
   const file = ambulance ? '/ambulance.glb' : `/car${vehicle.modelIdx + 1}.glb`;
@@ -53,7 +69,7 @@ function ScenarioVehicle({ vehicle, editing, selected, onSelect, onMove }) {
     <>
       <group ref={group} position={[vehicle.x, vehicle.y, vehicle.z]} rotation={[0, vehicle.rotation, 0]} onClick={event => {
         event.stopPropagation();
-        onSelect(vehicle.id);
+        if (!document.pointerLockElement) onSelect(vehicle.id);
       }}>
         <group scale={ambulance ? .194 : .6} rotation={[0, baseRotation, 0]}>
           <primitive object={model} />
@@ -73,24 +89,37 @@ function ScenarioVehicle({ vehicle, editing, selected, onSelect, onMove }) {
       {editing && selected && (
         <TransformControls
           object={group}
-          rotation={[0, 0, 0]}
+          mode={rotating ? 'rotate' : 'translate'}
+          rotationSnap={Math.PI / 2}
           space="world"
-          showY={false}
-          onMouseUp={() => onMove(vehicle.id, group.current.position.x, group.current.position.z)}
+          showX={!rotating}
+          showY={rotating}
+          showZ={!rotating}
+          onMouseUp={() => {
+            if (!rotating) {
+              onMove(vehicle.id, group.current.position.x, group.current.position.z);
+              return;
+            }
+            const facing = new Vector3(0, 0, -1).applyQuaternion(group.current.quaternion);
+            const angle = Math.atan2(-facing.x, -facing.z);
+            const direction = Object.keys(HEADINGS).reduce((best, next) =>
+              Math.cos(angle - HEADINGS[next].rotation) > Math.cos(angle - HEADINGS[best].rotation) ? next : best, vehicle.heading);
+            onRotate(vehicle.id, direction);
+          }}
         />
       )}
     </>
   );
 }
 
-function ScenarioClock({ vehicles, running, onTick, onComplete }) {
+function ScenarioClock({ vehicles, running, movingOncoming, onTick, onComplete }) {
   const sinceUpdate = useRef(0);
   const accumulated = useRef(0);
   useFrame((_, delta) => {
     if (!running) return;
     accumulated.current += Math.min(delta, .25);
     while (accumulated.current >= .04) {
-      stepScenario(vehicles, .04);
+      stepScenario(vehicles, .04, movingOncoming ? ONCOMING_FLOW_POLICY : undefined);
       accumulated.current -= .04;
       sinceUpdate.current += .04;
     }
@@ -98,7 +127,10 @@ function ScenarioClock({ vehicles, running, onTick, onComplete }) {
       sinceUpdate.current = 0;
       onTick(vehicles);
     }
-    if (vehicles.filter(vehicle => vehicle.kind === 'ambulance').every(vehicle => vehicle.done)) onComplete();
+    if (vehicles.filter(vehicle => vehicle.kind === 'ambulance').every(vehicle => vehicle.done)) {
+      onTick(vehicles);
+      onComplete();
+    }
   }, -1);
   return null;
 }
@@ -108,6 +140,9 @@ export function ScenarioWorkbench({ caseNumber, initialVehicles, resumeOnEdit, i
   const [draft, setDraft] = useState(() => snapshot(initialVehicles));
   const [runtime, setRuntime] = useState(null);
   const [editing, setEditing] = useState(true);
+  const [freeRoam, setFreeRoam] = useState(false);
+  const workbenchRef = useRef(null);
+  const [rotating, setRotating] = useState(false);
   const [running, setRunning] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [selection, setSelection] = useState(null);
@@ -139,6 +174,30 @@ export function ScenarioWorkbench({ caseNumber, initialVehicles, resumeOnEdit, i
       ? { ...vehicle, x, z, y: scenarioRoadHeight(x, z, vehicle.heading) } : vehicle));
   }
 
+  function rotateVehicle(id, direction) {
+    changeDraft(draft.map(vehicle => vehicle.id === id ? {
+      ...vehicle, heading: direction, rotation: HEADINGS[direction].rotation,
+      y: scenarioRoadHeight(vehicle.x, vehicle.z, direction),
+    } : vehicle));
+  }
+
+  function replaceLayout(next) {
+    nextId.current = next.length + 1;
+    resume.current = false;
+    changed.current = false;
+    setRunning(false);
+    setCompleted(false);
+    setEditing(true);
+    setRotating(false);
+    setSelection(null);
+    setRuntime(null);
+    setDraft(next);
+    setSetup(next);
+    setActivity([]);
+    setMessage('');
+    onSave(next);
+  }
+
   function addVehicles() {
     const requested = Number(count);
     if (!Number.isInteger(requested) || requested < 1) {
@@ -157,25 +216,33 @@ export function ScenarioWorkbench({ caseNumber, initialVehicles, resumeOnEdit, i
 
   function launch(placements = editing ? draft : setup) {
     const layout = snapshot(placements);
-    const problem = validateScenario(layout);
-    if (problem) {
-      setMessage(problem);
+    const staged = stageScenario(layout);
+    if (staged.error) {
+      setMessage(staged.error);
       return false;
     }
     setSetup(layout);
     if (changed.current || caseNumber === 4) onSave(layout);
-    setRuntime(snapshot(layout));
+    setRuntime(staged.vehicles);
     setEditing(false);
     setRunning(true);
     setCompleted(false);
     setActivity([]);
-    setMessage('');
+    setMessage(staged.adjusted ? `Separated ${staged.adjusted} close placements for this run.` : '');
     changed.current = false;
     return true;
   }
 
+  function toggleFreeRoam() {
+    if (!freeRoam) captureFreeRoamMouse(workbenchRef.current?.querySelector('canvas'));
+    setFreeRoam(!freeRoam);
+  }
+
   function toggleEdit() {
     if (!editing) {
+      if (document.pointerLockElement === workbenchRef.current?.querySelector('canvas')) {
+        document.exitPointerLock();
+      }
       resume.current = running;
       setRunning(false);
       setDraft(snapshot(runtime || setup));
@@ -208,7 +275,11 @@ export function ScenarioWorkbench({ caseNumber, initialVehicles, resumeOnEdit, i
       if (event.code === 'KeyE') {
         event.preventDefault();
         toggleEdit();
-      } else if (event.code === 'Enter' && !running && !event.target?.closest?.('button')) {
+      } else if (event.code === 'KeyC') {
+        if (!event.ctrlKey && !event.metaKey && !event.altKey) toggleFreeRoam();
+      } else if (event.code === 'KeyR' && editing && selection) {
+        setRotating(active => !active);
+      } else if (event.code === 'Enter' && !running) {
         event.preventDefault();
         launch();
       } else if (event.code === 'KeyF' && runtime && !editing && !completed) {
@@ -221,8 +292,11 @@ export function ScenarioWorkbench({ caseNumber, initialVehicles, resumeOnEdit, i
 
   const onTick = useCallback(current => {
     setActivity(current.filter(vehicle => vehicle.kind === 'ambulance' ||
-      vehicle.status === 'Yielding' || vehicle.status === 'Waiting for a gap' || vehicle.id === selection)
-      .map(({ id, status }) => ({ id, status })));
+      ['Yielding', 'Waiting for a gap', 'Holding the rescue lane', 'Making room for a neighbor'].includes(vehicle.status) ||
+      vehicle.status.endsWith(' to open a gap') ||
+      vehicle.id === selection)
+      .sort((a, b) => diagnosticPriority(a) - diagnosticPriority(b))
+      .map(vehicle => ({ id: vehicle.id, status: driverStatus(vehicle) })));
   }, [selection]);
   const onComplete = useCallback(() => {
     setRunning(false);
@@ -235,23 +309,28 @@ export function ScenarioWorkbench({ caseNumber, initialVehicles, resumeOnEdit, i
   }
 
   return (
-    <main className="relative h-screen overflow-hidden bg-slate-950 text-slate-100">
+    <main ref={workbenchRef} className="relative h-screen overflow-hidden bg-slate-950 text-slate-100">
       <Canvas
         dpr={1}
         camera={{ position: [-17, 83, 22], fov: 45 }}
-        onPointerMissed={() => setSelection(null)}
+        onPointerMissed={event => {
+          if (document.pointerLockElement || event.button !== 0) return;
+          setSelection(null);
+          if (freeRoam) captureFreeRoamMouse(workbenchRef.current?.querySelector('canvas'));
+        }}
       >
         <color attach="background" args={['#0d172a']} />
         <ambientLight intensity={1.25} />
         <directionalLight position={[42, 75, 35]} intensity={1.2} />
-        <OrbitControls makeDefault target={[-17, 0, 4]} minDistance={8} maxDistance={210} maxPolarAngle={Math.PI / 2.15} />
+        {freeRoam ? <FreeRoamFlightCamera editing={editing} /> :
+          <OrbitControls makeDefault target={[-17, 0, 4]} minDistance={8} maxDistance={210} maxPolarAngle={Math.PI / 2.15} />}
         <Suspense fallback={<Html center><span className="whitespace-nowrap rounded bg-slate-950 px-3 py-2 text-sm">Loading city…</span></Html>}>
           <CityScene />
           {vehicles.map(vehicle => (
             <ScenarioVehicle key={vehicle.id} vehicle={vehicle} editing={editing} selected={selection === vehicle.id}
-              onSelect={setSelection} onMove={moveVehicle} />
+              onSelect={setSelection} onMove={moveVehicle} onRotate={rotateVehicle} rotating={rotating} />
           ))}
-          <ScenarioClock vehicles={runtime || []} running={running && !editing} onTick={onTick} onComplete={onComplete} />
+          <ScenarioClock vehicles={runtime || []} running={running && !editing} movingOncoming={caseNumber === 4} onTick={onTick} onComplete={onComplete} />
         </Suspense>
       </Canvas>
       <section aria-label="Scenario controls" className="absolute left-4 top-4 max-h-[calc(100%-2rem)] w-80 max-w-[calc(100%-2rem)] overflow-auto rounded-xl border border-sky-400/35 bg-slate-950/95 p-4 text-sm shadow-2xl">
@@ -261,14 +340,32 @@ export function ScenarioWorkbench({ caseNumber, initialVehicles, resumeOnEdit, i
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
           <button className={control} onClick={toggleEdit}>{editing ? 'Finish edit [E]' : 'Edit [E]'}</button>
+          <button className={control} onClick={toggleFreeRoam}>{freeRoam ? 'Orbit view [C]' : 'Free roam [C]'}</button>
           <button className={primary} onClick={() => launch()} disabled={running}>
             {runtime && !editing ? 'Restart' : 'Run [Enter]'}
           </button>
           {runtime && !editing && !completed && <button className={control} onClick={() => setRunning(active => !active)}>{running ? 'Pause [F]' : 'Resume [F]'}</button>}
+          {runtime && !editing && !completed && (
+            <button className={control} onClick={() => {
+              if (requestAmbulanceBackout(runtime)) {
+                setMessage('Ambulance reversing along its approach.');
+                setRunning(true);
+              } else {
+                setMessage('The ambulance needs a recorded approach before it can reverse.');
+              }
+            }}>Reverse out</button>
+          )}
           {onOriginal && <button className={control} onClick={onOriginal}>Original demo</button>}
         </div>
+        {caseNumber === 4 && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button className={control} onClick={() => replaceLayout([])}>Reset</button>
+            <button className={control} onClick={() => replaceLayout(createSavedDenseFlowScenario())}>Load dense one-way example</button>
+          </div>
+        )}
         <div className="mt-2 text-xs text-slate-300">
-          {editing ? 'Select a vehicle, then drag its arrows on the road.' : running ? 'Running' : completed ? 'Run complete' : 'Ready to run'}
+          {freeRoam ? 'WASD to fly · Mouse to look · Esc frees cursor · Click empty view to recapture' :
+            editing ? 'Select a vehicle, then drag its arrows on the road.' : running ? 'Running' : completed ? 'Run complete' : 'Ready to run'}
           {' · '}{cars} {cars === 1 ? 'car' : 'cars'} · {ambulances} {ambulances === 1 ? 'ambulance' : 'ambulances'}
         </div>
         {editing && (
@@ -289,18 +386,20 @@ export function ScenarioWorkbench({ caseNumber, initialVehicles, resumeOnEdit, i
             )}
             {selected && (
               <div className="space-y-2">
+                {selected.kind === 'car' && <label className="flex items-center gap-2 text-xs">
+                  <input type="checkbox" checked={Boolean(selected.parked)} onChange={event =>
+                    changeDraft(draft.map(vehicle => vehicle.id === selected.id ? { ...vehicle, parked: event.target.checked } : vehicle))
+                  } />
+                  Parked obstacle
+                </label>}
+                <button className={control} onClick={() => setRotating(active => !active)}>{rotating ? 'Move [R]' : 'Rotate [R]'}</button>
+                <button className={control} onClick={() => rotateVehicle(selected.id, { N: 'S', E: 'W', S: 'N', W: 'E' }[selected.heading])}>Turn 180°</button>
                 <div className="grid grid-cols-2 gap-2">
                   <CoordinateInput key={`x-${selected.id}`} label="Position X" value={selected.x} onCommit={value => moveVehicle(selected.id, value, selected.z)} />
                   <CoordinateInput key={`z-${selected.id}`} label="Position Z" value={selected.z} onCommit={value => moveVehicle(selected.id, selected.x, value)} />
                 </div>
                 <div className="flex items-end gap-2">
-                  <label className="flex-1 text-xs">Vehicle heading<select className={`mt-1 w-full ${control}`} value={selected.heading} onChange={event => {
-                    const direction = event.target.value;
-                    changeDraft(draft.map(vehicle => vehicle.id === selected.id ? {
-                      ...vehicle, heading: direction, rotation: HEADINGS[direction].rotation,
-                      y: scenarioRoadHeight(vehicle.x, vehicle.z, direction),
-                    } : vehicle));
-                  }}>
+                  <label className="flex-1 text-xs">Vehicle heading<select className={`mt-1 w-full ${control}`} value={selected.heading} onChange={event => rotateVehicle(selected.id, event.target.value)}>
                     {Object.entries(directions).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
                   </select></label>
                   <button className={control} onClick={() => { changeDraft(draft.filter(vehicle => vehicle.id !== selected.id)); setSelection(null); }}>Remove selected</button>

@@ -8,14 +8,13 @@ import { useCase3TrafficStream } from '../../hooks/useCase3TrafficStream';
 import { useHardwareSerial } from '../../hooks/useHardwareSerial';
 import { useHardwareWifi } from '../../hooks/useHardwareWifi';
 import { Canvas3D } from '../../components/Canvas3D';
-import { createCase2Simulation } from '../../components/case2Simulation';
+import { case2TrafficSignal, createCase2Simulation } from '../../components/case2Simulation';
 import { ScenarioWorkbench } from '../../components/ScenarioWorkbench';
 import { HEADINGS, prepareImportedScenario, scenarioVehicle } from '../../components/scenarioTraffic';
 
 function Case2HUD({ simulation, frozen, dispatch, toggleFreeze, onBackToMenu }) {
   const { phase, northStatus } = simulation;
-  const eastGreen = phase === 'eastGreen';
-  const northGreen = phase === 'northGreen';
+  const { eGreen: eastGreen, nGreen: northGreen, eYellow, nYellow } = case2TrafficSignal(simulation);
   const active = phase !== 'ready' && phase !== 'complete';
   const eastStatus = {
     ready: 'Ready',
@@ -32,18 +31,19 @@ function Case2HUD({ simulation, frozen, dispatch, toggleFreeze, onBackToMenu }) 
       </div>
       <div aria-live="polite" className="space-y-3">
         {[
-          { direction: 'Eastbound', green: eastGreen, status: eastStatus },
-          { direction: 'Northbound', green: northGreen, status: northStatus },
-        ].map(({ direction, green, status }) => (
+          { direction: 'Eastbound', green: eastGreen, yellow: eYellow, status: eastStatus },
+          { direction: 'Northbound', green: northGreen, yellow: nYellow, status: northStatus },
+        ].map(({ direction, green, yellow, status }) => (
           <div key={direction} className="border-t border-slate-700 pt-2">
             <div className="flex items-center justify-between font-bold text-slate-100">
               {direction}
-              <span className={green ? 'text-green-400' : 'text-red-400'}>{green ? 'GREEN' : 'RED'}</span>
+              <span className={green ? 'text-green-400' : yellow ? 'text-amber-300' : 'text-red-400'}>{green ? 'GREEN' : yellow ? 'YELLOW' : 'RED'}</span>
             </div>
             <div className="mt-1 text-slate-300">{status}</div>
           </div>
         ))}
       </div>
+      {simulation.traffic && <p className="mt-2 text-emerald-300">Normal traffic cycle</p>}
       <div className="mt-4 flex gap-2">
         <button onClick={dispatch} disabled={active} className="flex-1 rounded bg-blue-300 px-2 py-2 font-bold text-slate-950 disabled:bg-slate-800 disabled:text-slate-300">
           {phase === 'ready' ? 'Dispatch both [Enter]' : phase === 'complete' ? 'Run again [Enter]' : 'Ambulances dispatched'}
@@ -353,7 +353,7 @@ export default function Dashboard() {
         if (event.target?.closest?.('button')) return;
         event.preventDefault();
         dispatchCase2();
-      } else if (event.code === 'KeyF' && case2.phase !== 'ready' && case2.phase !== 'complete') {
+      } else if (event.code === 'KeyF' && case2.phase !== 'ready') {
         toggleCase2Freeze();
       }
     };
@@ -650,11 +650,7 @@ export default function Dashboard() {
     );
   }
 
-  const case2Signals = {
-    phase: case2.phase,
-    eGreen: case2.phase === 'eastGreen',
-    nGreen: case2.phase === 'northGreen',
-  };
+  const case2Signals = case2TrafficSignal(case2);
   const signals = selectedCase === 1 ? case1Signal : selectedCase === 2 ? case2Signals : case3.signals;
 
   return (
@@ -672,7 +668,7 @@ export default function Dashboard() {
           activeCamFollow={case3.activeCamFollow}
           onSetCamFollow={case3.setCamFollow}
           isSimulationRunning={selectedCase === 1 ? case1Stream.isSimulationRunning : selectedCase === 2 ? case2.phase !== 'ready' && case2.phase !== 'complete' : case3.isSimulationRunning}
-          isPreempted={selectedCase === 1 ? case1Signal.isPreempted : selectedCase === 2 ? case2Signals.eGreen || case2Signals.nGreen : case3.deadlockDetected && !case3.trafficCycleActive}
+          isPreempted={selectedCase === 1 ? case1Signal.isPreempted : selectedCase === 2 ? case2.phase === 'eastGreen' || case2.phase === 'northGreen' : case3.deadlockDetected && !case3.trafficCycleActive}
           isFrozen={selectedCase === 1 ? case1Stream.isFrozen : selectedCase === 2 ? case2Frozen : case3.isFrozen}
           signalPhase={signals.signalPhase ?? signals.phase}
           nGreen={signals.nGreen} sGreen={signals.sGreen} eGreen={signals.eGreen} wGreen={signals.wGreen}

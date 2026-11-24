@@ -22,13 +22,20 @@ const NORTH_LANE = 0.81;
 const NORTH_PASS_LANE = 2.56;
 const NORTH_JUNCTION_LANE = 2.35;
 const NORTH_QUEUE_RETURN = 40;
-const EAST_DESTINATION = 58;
-const NORTH_DESTINATION = -58;
+const EAST_DESTINATION = 88;
+const NORTH_DESTINATION = -67;
 const AMBULANCE_CRUISE = CASE1_AMBULANCE_SPEED - 2;
 const CIVILIAN_CRUISE = NORMAL_TRAFFIC_SPEED - 1;
 const NORTH_CRAWL_SPEED = 5;
 const AMBULANCE = { length: 2.16, width: 0.79 };
 const CAR = { length: 1.64, width: 0.70 };
+const NORMAL_ARMS = ['E', 'N', 'S', 'W'];
+const NORMAL_ROUTES = {
+  E: { stop: EAST_CAR_STOP, clear: 7, exit: 72, entry: -79 },
+  N: { stop: NORTH_STOP, clear: -13, exit: -58, entry: 61 },
+  S: { stop: -14, clear: 15, exit: 61, entry: -58 },
+  W: { stop: 11, clear: -8, exit: -79, entry: 72 },
+};
 
 // Road elevations sampled along the two routes through the perimeter openings.
 const EAST_SURFACE = [[-120, .60], [-102, .60], [-96, .73], [-93, .67], [-90, .13], [-85, .17], [-30, .19], [-15, .17], [0, 0], [16, .13], [58, .19]];
@@ -71,8 +78,11 @@ function createCase2Traffic() {
   for (const car of cars) {
     if (car.type === 'E') {
       const outside = car.homePerp < CASE1_AMBULANCE_LANE_Z;
-      car.pos.z = outside ? -7.9 : -4.1;
-      car.pos.x -= outside ? 3.5 : 3;
+      const gaps = outside ? [0, 1.4, -.8, -2.1, .7, 2.4, 1, -.7, 1.6]
+        : [.1, -1.3, .8, 2, -.4, -1.7, .9, 2.1, .3];
+      const offset = Math.sin(car.id * 2.4) * .13;
+      car.pos.z = (outside ? -7.9 : -4.1) + offset;
+      car.pos.x -= (outside ? 3.5 : 3) + gaps[car.queueIndex];
       if (car.queueIndex === 2 || (outside && car.queueIndex === 5)) {
         car.pos.z += outside ? .45 : -.45;
       }
@@ -96,6 +106,7 @@ function createCase2Traffic() {
     }
     const [min, max] = roadLimits(car.type);
     car.pos[car.perpAxis] = MathUtils.clamp(car.pos[car.perpAxis], min + CAR.width, max - CAR.width);
+    car.returnPerp = car.pos[car.perpAxis];
     setRoadHeight(car.pos, car.type);
   }
   return cars;
@@ -290,8 +301,92 @@ function eastTrafficCleared(cars) {
     car.pos.x - footprint('E', car.rotY).x <= TRAFFIC_ROAD_EDGES.right);
 }
 
+function keepsJunction(car) {
+  const { stop, clear } = NORMAL_ROUTES[car.type];
+  const coordinate = car.pos[car.axis];
+  return (coordinate - stop) * car.sign > .001 && (coordinate - clear) * car.sign < 0;
+}
+
+function stepNormalTraffic(simulation, dt) {
+  const { cars, east, north, traffic, phase } = simulation;
+  const activeArm = NORMAL_ARMS[traffic.index];
+  const ambulances = phase === 'complete' ? [] : [[east, 'E', 0], [north, 'N', north.rotation]];
+  for (const car of cars) {
+    const { stop, exit, entry } = NORMAL_ROUTES[car.type];
+    const { pos, axis, sign, type, perpAxis } = car;
+    if (type === 'N' && pos.z >= NORTH_STOP - .001 && pos.z < 28 && pos.x < 2.65) mergeNorthboundCar(car, cars, north, dt);
+    if (type === 'S' && pos.z <= stop + .001 && pos.z > -26 && pos.x > -2.55) {
+      const next = { x: Math.max(-2.55, pos.x - dt), z: pos.z };
+      if (!cars.some(other => other !== car && overlaps(next, footprint(type, 0), other.pos, footprint(other.type, other.rotY), .2))) pos.x = next.x;
+    }
+    const approachingFixture = (type === 'N' && pos.x < 2.2) || (type === 'S' && pos.x > -2.5);
+    const extent = footprint(type, car.rotY);
+    const allowed = keepsJunction(car) || (traffic.stage === 'green' && activeArm === type && !approachingFixture);
+    const beyondStop = (pos[axis] - stop) * sign > .001;
+    let limit = allowed || beyondStop ? exit : stop;
+    for (const other of cars) {
+      if (other !== car && other.type === type) limit = followLimit(pos, extent, axis, sign, limit, other.pos, footprint(type, other.rotY), 1.0);
+    }
+    for (const [ambulance, direction, yaw] of ambulances) {
+      if (direction === type) limit = followLimit(pos, extent, axis, sign, limit, ambulance, footprint(direction, yaw, AMBULANCE), .8);
+    }
+    const next = { ...pos, speed: car.speed };
+    drive(next, next, axis, sign, limit, CIVILIAN_CRUISE, dt);
+    if (!cars.some(other => other !== car && overlaps(next, extent, other.pos, footprint(other.type, other.rotY), .10)) &&
+      !ambulances.some(([a, dir, yaw]) => overlaps(next, extent, a, footprint(dir, yaw, AMBULANCE), .10))) {
+      pos[axis] = next[axis];
+      car.speed = next.speed;
+    } else car.speed = 0;
+    if (pos[axis] !== exit || phase !== 'complete') continue;
+    const spawn = { ...pos, [axis]: entry, [perpAxis]: car.returnPerp };
+    if (cars.some(other => other !== car && overlaps(spawn, footprint(type, 0), other.pos, footprint(other.type, other.rotY), 1.2))) continue;
+    pos.set(spawn.x, spawn.y, spawn.z);
+    car.rotY = 0;
+    setRoadHeight(pos, type);
+  }
+  traffic.remaining -= dt;
+  if (traffic.remaining > 0) return;
+  if (traffic.stage === 'green') {
+    traffic.stage = traffic.initial ? 'clearance' : 'yellow';
+    traffic.remaining = traffic.initial ? .5 : 2.5;
+  } else if (traffic.stage === 'yellow') {
+    traffic.stage = 'clearance';
+    traffic.remaining = .5;
+  } else if (!cars.some(keepsJunction)) {
+    traffic.index = (traffic.index + 1) % NORMAL_ARMS.length;
+    traffic.initial = false;
+    traffic.stage = 'green';
+    traffic.remaining = 12.5;
+  }
+}
+
+export function case2TrafficSignal(simulation) {
+  const { phase, traffic } = simulation;
+  const arm = traffic && NORMAL_ARMS[traffic.index].toLowerCase();
+  return {
+    phase: traffic ? 'NORMAL_CYCLE' : phase,
+    eGreen: phase === 'eastGreen' || (arm === 'e' && traffic.stage === 'green'),
+    nGreen: phase === 'northGreen' || (arm === 'n' && traffic.stage === 'green'),
+    sGreen: arm === 's' && traffic.stage === 'green',
+    wGreen: arm === 'w' && traffic.stage === 'green',
+    ...(traffic?.stage === 'yellow' ? { [`${arm}Yellow`]: true } : {}),
+  };
+}
+
 export function stepCase2(simulation, dt) {
-  if (dt <= 0 || simulation.phase === 'ready' || simulation.phase === 'complete') return;
+  if (dt <= 0 || simulation.phase === 'ready') return;
+  if (simulation.traffic) {
+    if (simulation.phase !== 'complete') {
+      drive(simulation.east, simulation.east, 'x', 1, EAST_DESTINATION, AMBULANCE_CRUISE, dt);
+      advanceNorth(simulation, false, dt);
+      setRoadHeight(simulation.east, 'E', dt);
+      setRoadHeight(simulation.north, 'N', dt);
+      if (simulation.north.z <= NORTH_DESTINATION && simulation.east.x >= EAST_DESTINATION) simulation.phase = 'complete';
+    }
+    stepNormalTraffic(simulation, dt);
+    for (const car of simulation.cars) setRoadHeight(car.pos, car.type, dt);
+    return;
+  }
 
   const { cars, east, north } = simulation;
   const northHeld = simulation.phase !== 'northGreen' && simulation.phase !== 'clear';
@@ -317,7 +412,8 @@ export function stepCase2(simulation, dt) {
       if (corridorClear) simulation.northStatus = 'Green · crossing the junction';
     }
   } else if (north.z <= NORTH_CLEAR) {
-    simulation.phase = north.z <= NORTH_DESTINATION && east.x >= EAST_DESTINATION ? 'complete' : 'clear';
+    simulation.phase = 'clear';
     simulation.northStatus = 'Junction clear · hospital-bound';
+    simulation.traffic = { index: 0, stage: 'green', initial: true, remaining: 5 };
   }
 }

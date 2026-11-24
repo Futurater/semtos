@@ -47,7 +47,14 @@ function CameraTrackerBridge({ textRef }) {
   return null;
 }
 
-export function FreeRoamFlightCamera() {
+export function captureFreeRoamMouse(canvas) {
+  if (!canvas || document.pointerLockElement === canvas) return;
+  try {
+    canvas.requestPointerLock?.()?.catch(() => {});
+  } catch (_) {}
+}
+
+export function FreeRoamFlightCamera({ editing = false } = {}) {
   const { camera, gl } = useThree();
   const keys = useRef({ w: false, a: false, s: false, d: false, space: false, shift: false });
   const isDragging = useRef(false);
@@ -58,11 +65,10 @@ export function FreeRoamFlightCamera() {
     const dom = gl.domElement;
     euler.current.setFromQuaternion(camera.quaternion);
 
-    try {
-      dom.requestPointerLock?.();
-    } catch (_) {}
+    if (!editing) captureFreeRoamMouse(dom);
 
     const onKeyDown = (e) => {
+      if (e.target?.closest?.('input,select,textarea,[contenteditable]')) return;
       if (e.key === 'Control' || e.code === 'ControlLeft' || e.code === 'ControlRight' || e.code === 'Escape') {
         if (document.pointerLockElement) {
           document.exitPointerLock?.();
@@ -74,7 +80,7 @@ export function FreeRoamFlightCamera() {
       if (e.code === 'KeyS' || e.code === 'ArrowDown') keys.current.s = true;
       if (e.code === 'KeyA' || e.code === 'ArrowLeft') keys.current.a = true;
       if (e.code === 'KeyD' || e.code === 'ArrowRight') keys.current.d = true;
-      if (e.code === 'Space' || e.code === 'KeyE') keys.current.space = true;
+      if (e.code === 'Space' || (!editing && e.code === 'KeyE')) keys.current.space = true;
       if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'KeyQ') keys.current.shift = true;
     };
 
@@ -88,12 +94,11 @@ export function FreeRoamFlightCamera() {
     };
 
     const onClick = () => {
-      if (document.pointerLockElement !== dom) {
-        dom.requestPointerLock?.();
-      }
+      if (!editing) captureFreeRoamMouse(dom);
     };
 
     const onMouseDown = (e) => {
+      if (editing && e.button !== 2) return;
       isDragging.current = true;
       prevMouse.current = { x: e.clientX, y: e.clientY };
     };
@@ -127,6 +132,7 @@ export function FreeRoamFlightCamera() {
     const onMouseUp = () => {
       isDragging.current = false;
     };
+    const onContextMenu = (e) => { if (editing) e.preventDefault(); };
 
     const onWheel = (e) => {
       const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
@@ -137,6 +143,7 @@ export function FreeRoamFlightCamera() {
     window.addEventListener('keyup', onKeyUp);
     dom.addEventListener('click', onClick);
     dom.addEventListener('mousedown', onMouseDown);
+    dom.addEventListener('contextmenu', onContextMenu);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
     dom.addEventListener('wheel', onWheel, { passive: true });
@@ -149,11 +156,12 @@ export function FreeRoamFlightCamera() {
       window.removeEventListener('keyup', onKeyUp);
       dom.removeEventListener('click', onClick);
       dom.removeEventListener('mousedown', onMouseDown);
+      dom.removeEventListener('contextmenu', onContextMenu);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
       dom.removeEventListener('wheel', onWheel);
     };
-  }, [camera, gl]);
+  }, [camera, gl, editing]);
 
   useFrame((_, delta) => {
     const moveSpeed = (keys.current.shift ? 45 : 30) * delta;
@@ -755,16 +763,16 @@ export function Canvas3D({
           
           {case2 ? (
             <>
-              <Ambulance3D
+              {case2.phase !== 'complete' && <><Ambulance3D
                 position={case2.east}
                 floatingLabel="High Priority"
-                corridorActive={eGreen}
+                corridorActive={case2.phase === 'eastGreen'}
                 ringColor="#38bdf8"
                 ringRadius={CASE2_EAST_YIELD_RADIUS}
-                showRing={eGreen}
+                showRing={case2.phase === 'eastGreen'}
                 livePosition
               />
-              <Ambulance3D position={case2.north} livePosition showRing={false} />
+              <Ambulance3D position={case2.north} livePosition showRing={false} /></>}
             </>
           ) : selectedCase === 3 ? (
             <>
