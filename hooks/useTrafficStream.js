@@ -1,12 +1,15 @@
 // hooks/useTrafficStream.js
 import { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  CASE1_AMBULANCE_SPEED,
+  CASE1_AMBULANCE_START_X as AMB_START_X,
+  CASE1_AMBULANCE_LANE_Z as AMB_LANE_Z,
+  CASE1_PREEMPTION_X as AVE_ENTRY_X,
+} from '../components/standardTraffic';
 
 // Ambulance starts far West on the main avenue and drives East (along +X).
-const AMB_START_X      = -120;
-const AMB_LANE_Z       =  -6.0;  // East-bound lane centre Z
-const AMB_SPEED_DX     =   0.6;  // units per 50 ms tick (~12 u/s)
+const AMB_SPEED_DX     = CASE1_AMBULANCE_SPEED / 20; // units per 50 ms tick
 const AMB_WRAP_X       =  150;
-const AVE_ENTRY_X      =  -85;   // fires W_GREEN signal
 const CLEARED_X        =   15;   // fires N_RELEASE sequential sequence
 
 export function useTrafficStream(useMockData = true) {

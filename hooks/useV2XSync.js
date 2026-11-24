@@ -126,6 +126,7 @@ export function useV2XBroadcaster({
         selectedCase, case1Stream, case1Signal, case3, vehiclesRef, espIp,
         isWifiEnabled, lastWifiByteSent, serialLastByte, isSerialConnected,
       } = latest.current;
+      if (selectedCase !== 1 && selectedCase !== 3) return;
       const c1Pos = case1Stream?.ambulancePosition || { x: -120, y: 0.5, z: -6.0, rotation: -Math.PI / 2 };
       const c1Geo = twinToRoadGeo(c1Pos.x, c1Pos.z, { ambId: 'AMB_1' });
 

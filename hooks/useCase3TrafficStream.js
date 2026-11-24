@@ -26,7 +26,7 @@ const DETOUR_WAYPOINTS = [
   { id: 4, name: 'Main Avenue Re-entry',    triggerAxis: 'z', triggerVal: -2.89, condition: '>=', targetRot: Math.PI / 2,  nextDir: 'W' },
 ];
 
-export function useCase3TrafficStream(isActive) {
+export function useCase3TrafficStream(active = true) {
   const [state, setState] = useState({
     ambulanceA: {
       id: 'AMB_A',
@@ -77,6 +77,8 @@ export function useCase3TrafficStream(isActive) {
   });
 
   const simRunningRef = useRef(false);
+  const activeRef = useRef(active);
+  activeRef.current = active;
   const isFrozenRef   = useRef(false);
   const trafficCycleActiveRef = useRef(false);
   const cycleArmIndexRef = useRef(0);
@@ -170,7 +172,7 @@ export function useCase3TrafficStream(isActive) {
 
   // Key listeners for Case 3
   useEffect(() => {
-    if (!isActive) return;
+    if (!active) return;
     const handleKeyDown = (e) => {
       if (e.target?.closest?.('input, textarea, select, dialog, [contenteditable]')) return;
       if (e.code === 'KeyF') {
@@ -189,7 +191,7 @@ export function useCase3TrafficStream(isActive) {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isActive, toggleFreeze]);
+  }, [active, toggleFreeze]);
 
   // ── Main simulation tick loop (50ms physics / 200ms HUD throttle) ───────────
   // The ref-based position values (posARef, posBRef) update every 50ms tick for
@@ -201,7 +203,7 @@ export function useCase3TrafficStream(isActive) {
     let lastHudUpdate = 0; // timestamp of last setState call (ms)
 
     const interval = setInterval(() => {
-      if (!simRunningRef.current || isFrozenRef.current) return;
+      if (!activeRef.current || !simRunningRef.current || isFrozenRef.current) return;
 
       // ────────────────────────────────────────────────────────────────────────
       // 0. Post-Clearance Normal Traffic Signal Orchestration (Case 1 Functionality)

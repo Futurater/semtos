@@ -9,8 +9,57 @@ import { useHardwareSerial } from '../../hooks/useHardwareSerial';
 import { useHardwareWifi } from '../../hooks/useHardwareWifi';
 import CoordinationQueue from '../../components/CoordinationQueue';
 import OperationsHeader from '../../components/OperationsHeader';
-import { ArrowUpRight, Route, GitBranch, Timer, MapPin } from 'lucide-react';
+import { ArrowUpRight, Route, GitBranch, Timer, SlidersHorizontal, MapPin } from 'lucide-react';
 import { Canvas3D } from '../../components/Canvas3D';
+import { case2TrafficSignal, createCase2Simulation } from '../../components/case2Simulation';
+import { ScenarioWorkbench } from '../../components/ScenarioWorkbench';
+import { HEADINGS, prepareImportedScenario, scenarioVehicle } from '../../components/scenarioTraffic';
+
+function Case2HUD({ simulation, frozen, dispatch, toggleFreeze, onBackToMenu }) {
+  const { phase, northStatus } = simulation;
+  const { eGreen: eastGreen, nGreen: northGreen, eYellow, nYellow } = case2TrafficSignal(simulation);
+  const active = phase !== 'ready' && phase !== 'complete';
+  const eastStatus = {
+    ready: 'Ready',
+    approach: 'Approaching the junction',
+    eastGreen: 'Priority · green corridor',
+    eastClearance: 'Junction traffic clearing',
+  }[phase] || 'Junction clear · hospital-bound';
+
+  return (
+    <section aria-label="Case 2 controls" className="twin-card twin-instrument text-xs">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <span className="font-bold text-blue-300">CASE 02 · DUAL AMBULANCE</span>
+        <button onClick={onBackToMenu} className="rounded bg-slate-800 px-2 py-1 text-slate-200">Menu</button>
+      </div>
+      <div aria-live="polite" className="space-y-3">
+        {[
+          { direction: 'Eastbound', green: eastGreen, yellow: eYellow, status: eastStatus },
+          { direction: 'Northbound', green: northGreen, yellow: nYellow, status: northStatus },
+        ].map(({ direction, green, yellow, status }) => (
+          <div key={direction} className="border-t border-slate-700 pt-2">
+            <div className="flex items-center justify-between font-bold text-slate-100">
+              {direction}
+              <span className={green ? 'text-green-400' : yellow ? 'text-amber-300' : 'text-red-400'}>{green ? 'GREEN' : yellow ? 'YELLOW' : 'RED'}</span>
+            </div>
+            <div className="mt-1 text-slate-300">{status}</div>
+          </div>
+        ))}
+      </div>
+      {simulation.traffic && <p className="mt-2 text-emerald-300">Normal traffic cycle</p>}
+      <div className="mt-4 flex gap-2">
+        <button onClick={dispatch} disabled={active} className="flex-1 rounded bg-blue-300 px-2 py-2 font-bold text-slate-950 disabled:bg-slate-800 disabled:text-slate-300">
+          {phase === 'ready' ? 'Run simulation [Enter]' : phase === 'complete' ? 'Run again [Enter]' : 'Simulation running'}
+        </button>
+        {active && (
+          <button onClick={toggleFreeze} className="rounded bg-slate-800 px-2 py-2 text-slate-100">
+            {frozen ? 'Resume [F]' : 'Pause [F]'}
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
 
 function TwinPanel({ id, title, onBackToMenu, onSwitchCase, children }) {
   return <aside className="twin-card twin-instrument">
@@ -60,20 +109,73 @@ export default function Dashboard() {
   const [selectedCase, setSelectedCase] = useState(1);
   const [dispatch, setDispatch] = useState(null);
   const lastDispatchId = useRef(null);
+  const [editor, setEditor] = useState(null);
+  const scenarioLayouts = useRef({});
 
   // Case 1 Hooks
-  const case1Stream = useTrafficStream(selectedCase === 1);
+  const case1Stream = useTrafficStream(selectedCase === 1 && !editor);
   const case1Signal = useTrafficSignal();
 
   // Case 3 Hook
-  const case3 = useCase3TrafficStream(selectedCase === 3);
+  const case3 = useCase3TrafficStream(selectedCase === 3 && !editor);
+  const [case2, setCase2] = useState(createCase2Simulation);
+  const [case2Frozen, setCase2Frozen] = useState(false);
+  const [, setCase2Revision] = useState(0);
+  const onCase2Change = useCallback(() => setCase2Revision(value => value + 1), []);
+  const dispatchCase2 = useCallback(() => {
+    setCase2Frozen(false);
+    setCase2(current => {
+      if (current.phase !== 'ready' && current.phase !== 'complete') return current;
+      return { ...createCase2Simulation(), phase: 'approach', northStatus: 'Approaching the junction' };
+    });
+  }, []);
+  const toggleCase2Freeze = useCallback(() => setCase2Frozen(frozen => !frozen), []);
+
+  useEffect(() => {
+    if (!started || selectedCase !== 2 || editor) return;
+    const onKeyDown = (event) => {
+      if (event.repeat || event.target?.closest?.('input,textarea,select,dialog,[contenteditable]')) return;
+      if (event.code === 'Enter') {
+        if (event.target?.closest?.('button')) return;
+        event.preventDefault();
+        dispatchCase2();
+      } else if (event.code === 'KeyF' && case2.phase !== 'ready') {
+        toggleCase2Freeze();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [started, selectedCase, editor, case2, dispatchCase2, toggleCase2Freeze]);
 
   const vehiclesRef = useRef([]);
 
+  const beginEdit = useCallback(() => {
+    const saved = scenarioLayouts.current[selectedCase];
+    if (saved) {
+      setEditor({ vehicles: saved, resume: false });
+      return;
+    }
+    const traffic = (selectedCase === 2 ? case2.cars : vehiclesRef.current).map(car =>
+      scenarioVehicle(`Car ${car.id}`, 'car', car.pos.x, car.pos.z, car.type, car.modelIdx, car.pos.y)
+    );
+    const ambulances = selectedCase === 1 ? [case1Stream.ambulancePosition]
+      : selectedCase === 2 ? [case2.east, case2.north] : [case3.ambulanceA.position, case3.ambulanceB.position];
+    for (const [index, position] of ambulances.entries()) {
+      const heading = Object.keys(HEADINGS).reduce((best, direction) =>
+        Math.cos(position.rotation - HEADINGS[direction].rotation) > Math.cos(position.rotation - HEADINGS[best].rotation)
+          ? direction : best, 'N');
+      traffic.push(scenarioVehicle(`Ambulance ${index + 1}`, 'ambulance', position.x, position.z, heading, 0, position.y));
+    }
+    const running = selectedCase === 1 ? case1Stream.isSimulationRunning && !case1Stream.isFrozen
+      : selectedCase === 2 ? case2.phase !== 'ready' && case2.phase !== 'complete' && !case2Frozen
+      : case3.isSimulationRunning && !case3.isFrozen;
+    setEditor({ ...prepareImportedScenario(traffic), resume: running });
+  }, [selectedCase, case1Stream, case2, case2Frozen, case3]);
+
   const startDispatch = useCallback(record => {
     if (lastDispatchId.current === record.id) return;
-    const active = record.caseId === 1 ? case1Stream.isSimulationRunning :
-      case3.isSimulationRunning && !case3.trafficCycleActive;
+    if (editor) throw new Error('Leave the scenario editor before starting coordination.');
+    const active = case1Stream.isSimulationRunning || (case3.isSimulationRunning && !case3.trafficCycleActive);
     if (active) throw new Error('A dispatch is already active in this scenario.');
     lastDispatchId.current = record.id;
     setDispatch(record);
@@ -81,12 +183,17 @@ export default function Dashboard() {
     setStarted(true);
     if (record.caseId === 1) case1Stream.dispatchCase1();
     else case3.dispatchCase3();
-  }, [case1Stream, case3]);
+  }, [case1Stream, case3, editor]);
 
   const handleRemoteCommand = useCallback((command, payload) => {
     if ((command === 'SWITCH_CASE' || command === 'SET_CASE') && (payload.caseId || payload.caseNumber)) {
-      setSelectedCase(payload.caseId || payload.caseNumber);
+      const number = Number(payload.caseId || payload.caseNumber);
+      if (![1, 2, 3, 4].includes(number)) return;
+      setEditor(null);
+      setSelectedCase(number);
       setStarted(true);
+    } else if (editor || selectedCase === 4) {
+      return;
     } else if (command === 'DISPATCH' && payload.dispatch) {
       try { startDispatch(payload.dispatch); } catch (error) { console.warn(error.message); }
     } else if (command === 'NORMAL_CYCLE') {
@@ -96,11 +203,13 @@ export default function Dashboard() {
     } else if (command === 'FREEZE') {
       if (selectedCase === 1) {
         case1Stream.toggleFreeze?.();
+      } else if (selectedCase === 2) {
+        toggleCase2Freeze();
       } else {
         case3.toggleFreeze();
       }
     }
-  }, [selectedCase, case1Stream, case1Signal, case3, startDispatch]);
+  }, [selectedCase, editor, case1Stream, case1Signal, case3, startDispatch, toggleCase2Freeze]);
 
   // ESP32 Web Serial Hardware Synchronization (Zero-Fail Fallback)
   const {
@@ -153,7 +262,7 @@ export default function Dashboard() {
 
   // Live 20Hz V2X Telemetry Broadcaster to /ambulance and /driver dashboards
   useV2XBroadcaster({
-    selectedCase,
+    selectedCase: editor ? 4 : selectedCase,
     case1Stream,
     case1Signal,
     case3,
@@ -184,6 +293,7 @@ export default function Dashboard() {
 
   // Synchronize simulation signal states in real-time to physical ESP32
   useEffect(() => {
+    if (editor || selectedCase === 4) return;
     let targetByte = 'R';
 
     if (selectedCase === 1) {
@@ -232,6 +342,7 @@ export default function Dashboard() {
     sendWifiCommand(targetByte);
   }, [
     selectedCase,
+    editor,
     case1Signal.phase,
     case1Signal.signalPhase,
     case1Signal.wGreen,
@@ -248,8 +359,9 @@ export default function Dashboard() {
   if (!started) {
     const cases = [
       { id: 1, icon: Route, title: 'Ambulance priority', description: 'Clear the M.G. Road approach for a single emergency vehicle.' },
+      { id: 2, icon: Timer, title: 'Dual-ambulance priority handoff', description: 'Clear the eastbound unit first, then release the northbound approach.' },
       { id: 3, icon: GitBranch, title: 'Dual ambulance response', description: 'Give one unit priority and route the second through Cubbon Road.' },
-      { id: 2, icon: Timer, title: 'Adaptive signals', description: 'Adjust signal timing to the queue on each approach.', pending: true },
+      { id: 4, icon: SlidersHorizontal, title: 'Custom scenario builder', description: 'Place vehicles, choose their headings, and test how traffic yields.' },
     ];
     return <main className="operations overview">
       <OperationsHeader/>
@@ -263,7 +375,12 @@ export default function Dashboard() {
           <figcaption><MapPin size={13}/> Central Bengaluru <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap</a></figcaption></figure></section>
         <div className="overview-grid"><section className="scenarios"><div className="section-heading"><h2>Simulation desk</h2><span>3D digital twin</span></div>
           {cases.map(({ id, icon: Icon, title, description, pending }) => <button key={id} className="case-row" disabled={pending}
-            onClick={() => {setSelectedCase(id);setStarted(true);}}>
+            onClick={() => {
+              const layout = scenarioLayouts.current[id];
+              setSelectedCase(id);
+              setEditor(layout ? { vehicles: layout, resume: false } : null);
+              setStarted(true);
+            }}>
             <i className="case-symbol"><Icon size={22}/></i><span className="case-info"><small>Case 0{id}</small><strong>{title}</strong><span>{description}</span></span>
             {pending ? <small>Planned</small> : <ArrowUpRight size={19}/>}
           </button>)}</section>
@@ -275,29 +392,44 @@ export default function Dashboard() {
       </div></main>;
   }
 
+  if (editor || selectedCase === 4) {
+    return (
+      <ScenarioWorkbench
+        key={selectedCase}
+        caseNumber={selectedCase}
+        initialVehicles={editor?.vehicles || scenarioLayouts.current[selectedCase] || []}
+        resumeOnEdit={editor?.resume ?? false}
+        importAdjustments={editor?.adjusted ?? 0}
+        onSave={vehicles => { scenarioLayouts.current[selectedCase] = vehicles; }}
+        onMenu={() => { setEditor(null); setStarted(false); }}
+        onOriginal={selectedCase !== 4 ? () => setEditor(null) : undefined}
+      />
+    );
+  }
+
+  const case2Signals = case2TrafficSignal(case2);
+  const signals = selectedCase === 1 ? case1Signal : selectedCase === 2 ? case2Signals : case3.signals;
+
   return (
     <main className="twin-studio relative w-screen h-screen overflow-hidden bg-black text-slate-200 font-sans">
       <div className="absolute inset-0 z-0">
         <Canvas3D
           selectedCase={selectedCase}
+          onEditScenario={beginEdit}
           vehiclesRef={vehiclesRef}
           ambulancePosition={case1Stream.ambulancePosition}
           ambulanceA={case3.ambulanceA}
           ambulanceB={case3.ambulanceB}
+          case2={selectedCase === 2 ? case2 : null}
+          onCase2Change={onCase2Change}
           activeCamFollow={case3.activeCamFollow}
           onSetCamFollow={case3.setCamFollow}
-          isSimulationRunning={selectedCase === 1 ? case1Stream.isSimulationRunning : case3.isSimulationRunning}
-          isPreempted={selectedCase === 1 ? case1Signal.isPreempted : (case3.deadlockDetected && !case3.trafficCycleActive)}
-          isFrozen={selectedCase === 1 ? case1Stream.isFrozen : case3.isFrozen}
-          signalPhase={selectedCase === 1 ? case1Signal.signalPhase : case3.signals.phase}
-          nGreen={selectedCase === 1 ? case1Signal.nGreen : case3.signals.nGreen}
-          sGreen={selectedCase === 1 ? case1Signal.sGreen : case3.signals.sGreen}
-          eGreen={selectedCase === 1 ? case1Signal.eGreen : case3.signals.eGreen}
-          wGreen={selectedCase === 1 ? case1Signal.wGreen : case3.signals.wGreen}
-          nYellow={selectedCase === 1 ? case1Signal.nYellow : case3.signals.nYellow}
-          sYellow={selectedCase === 1 ? case1Signal.sYellow : case3.signals.sYellow}
-          eYellow={selectedCase === 1 ? case1Signal.eYellow : case3.signals.eYellow}
-          wYellow={selectedCase === 1 ? case1Signal.wYellow : case3.signals.wYellow}
+          isSimulationRunning={selectedCase === 1 ? case1Stream.isSimulationRunning : selectedCase === 2 ? case2.phase !== 'ready' && case2.phase !== 'complete' : case3.isSimulationRunning}
+          isPreempted={selectedCase === 1 ? case1Signal.isPreempted : selectedCase === 2 ? case2.phase === 'eastGreen' || case2.phase === 'northGreen' : case3.deadlockDetected && !case3.trafficCycleActive}
+          isFrozen={selectedCase === 1 ? case1Stream.isFrozen : selectedCase === 2 ? case2Frozen : case3.isFrozen}
+          signalPhase={signals.signalPhase ?? signals.phase}
+          nGreen={signals.nGreen} sGreen={signals.sGreen} eGreen={signals.eGreen} wGreen={signals.wGreen}
+          nYellow={signals.nYellow} sYellow={signals.sYellow} eYellow={signals.eYellow} wYellow={signals.wYellow}
         />
       </div>
 
@@ -311,7 +443,7 @@ export default function Dashboard() {
         top: 20,
         right: 20,
         zIndex: 120,
-        display: 'flex',
+        display: selectedCase === 2 ? 'none' : 'flex',
         alignItems: 'center',
         gap: 8,
         fontFamily: 'monospace'
@@ -740,6 +872,14 @@ export default function Dashboard() {
           start={startDispatch}
           onBackToMenu={() => setStarted(false)}
           onSwitchCase={(caseId) => setSelectedCase(caseId)}
+        />
+      ) : selectedCase === 2 ? (
+        <Case2HUD
+          simulation={case2}
+          frozen={case2Frozen}
+          dispatch={dispatchCase2}
+          toggleFreeze={toggleCase2Freeze}
+          onBackToMenu={() => setStarted(false)}
         />
       ) : (
         <Case3TelemetryHUD

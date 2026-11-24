@@ -1,4 +1,4 @@
-import React, { Suspense, useRef, useState, useEffect } from 'react';
+import React, { Suspense, useRef, useState, useEffect, useMemo } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Html, useProgress, PointerLockControls, TransformControls, useGLTF, Center, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -6,6 +6,7 @@ import { CityScene } from './CityScene';
 import { Ambulance3D } from './Ambulance3D';
 import { TrafficManager } from './TrafficManager';
 import { ComputerVisionOverlay } from './ComputerVisionOverlay';
+import { CASE2_EAST_YIELD_RADIUS } from './case2Simulation';
 
 function Loader() {
   const { progress } = useProgress();
@@ -46,7 +47,14 @@ function CameraTrackerBridge({ textRef }) {
   return null;
 }
 
-export function FreeRoamFlightCamera() {
+export function captureFreeRoamMouse(canvas) {
+  if (!canvas || document.pointerLockElement === canvas) return;
+  try {
+    canvas.requestPointerLock?.()?.catch(() => {});
+  } catch (_) {}
+}
+
+export function FreeRoamFlightCamera({ editing = false } = {}) {
   const { camera, gl } = useThree();
   const keys = useRef({ w: false, a: false, s: false, d: false, space: false, shift: false });
   const isDragging = useRef(false);
@@ -57,11 +65,10 @@ export function FreeRoamFlightCamera() {
     const dom = gl.domElement;
     euler.current.setFromQuaternion(camera.quaternion);
 
-    try {
-      dom.requestPointerLock?.();
-    } catch (_) {}
+    if (!editing) captureFreeRoamMouse(dom);
 
     const onKeyDown = (e) => {
+      if (e.target?.closest?.('input,select,textarea,[contenteditable]')) return;
       if (e.key === 'Control' || e.code === 'ControlLeft' || e.code === 'ControlRight' || e.code === 'Escape') {
         if (document.pointerLockElement) {
           document.exitPointerLock?.();
@@ -73,7 +80,7 @@ export function FreeRoamFlightCamera() {
       if (e.code === 'KeyS' || e.code === 'ArrowDown') keys.current.s = true;
       if (e.code === 'KeyA' || e.code === 'ArrowLeft') keys.current.a = true;
       if (e.code === 'KeyD' || e.code === 'ArrowRight') keys.current.d = true;
-      if (e.code === 'Space' || e.code === 'KeyE') keys.current.space = true;
+      if (e.code === 'Space' || (!editing && e.code === 'KeyE')) keys.current.space = true;
       if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'KeyQ') keys.current.shift = true;
     };
 
@@ -87,12 +94,11 @@ export function FreeRoamFlightCamera() {
     };
 
     const onClick = () => {
-      if (document.pointerLockElement !== dom) {
-        dom.requestPointerLock?.();
-      }
+      if (!editing) captureFreeRoamMouse(dom);
     };
 
     const onMouseDown = (e) => {
+      if (editing && e.button !== 2) return;
       isDragging.current = true;
       prevMouse.current = { x: e.clientX, y: e.clientY };
     };
@@ -126,6 +132,7 @@ export function FreeRoamFlightCamera() {
     const onMouseUp = () => {
       isDragging.current = false;
     };
+    const onContextMenu = (e) => { if (editing) e.preventDefault(); };
 
     const onWheel = (e) => {
       const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
@@ -136,6 +143,7 @@ export function FreeRoamFlightCamera() {
     window.addEventListener('keyup', onKeyUp);
     dom.addEventListener('click', onClick);
     dom.addEventListener('mousedown', onMouseDown);
+    dom.addEventListener('contextmenu', onContextMenu);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
     dom.addEventListener('wheel', onWheel, { passive: true });
@@ -148,11 +156,12 @@ export function FreeRoamFlightCamera() {
       window.removeEventListener('keyup', onKeyUp);
       dom.removeEventListener('click', onClick);
       dom.removeEventListener('mousedown', onMouseDown);
+      dom.removeEventListener('contextmenu', onContextMenu);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
       dom.removeEventListener('wheel', onWheel);
     };
-  }, [camera, gl]);
+  }, [camera, gl, editing]);
 
   useFrame((_, delta) => {
     const moveSpeed = (keys.current.shift ? 45 : 30) * delta;
@@ -171,6 +180,11 @@ export function FreeRoamFlightCamera() {
   return null;
 }
 
+function setCase1EntryShot(ambulancePosition, position, target) {
+  position.set(-103.50, 3.33, -2.89);
+  target.set(ambulancePosition.x, 2, ambulancePosition.z);
+}
+
 export function CinematicCamera({ ambulancePosition, isSimulationRunning }) {
   const currentLookAt = useRef(new THREE.Vector3(0, 3, 0));
 
@@ -183,8 +197,7 @@ export function CinematicCamera({ ambulancePosition, isSimulationRunning }) {
       targetPosition.set(-13, 48, 19);
       targetLookAt.set(0, 0, 0);
     } else if (ambulancePosition.x < -80) {
-      targetPosition.set(-103.50, 3.33, -2.89);
-      targetLookAt.set(ambulancePosition.x, 2, ambulancePosition.z);
+      setCase1EntryShot(ambulancePosition, targetPosition, targetLookAt);
     } 
     // PHASE 2: IMMEDIATE FOLLOW - Lock behind ambulance as soon as it turns
     else if (ambulancePosition.x >= -80 && ambulancePosition.x < -25) {
@@ -321,6 +334,55 @@ export function Case3OverviewCamera() {
     currentLookAt.current.z = THREE.MathUtils.damp(currentLookAt.current.z, targetLookAt.z, 3.0, dt);
     state.camera.lookAt(currentLookAt.current);
   });
+
+  return null;
+}
+
+function Case2CinematicCamera({ simulation }) {
+  const previousShot = useRef(null);
+  const view = useMemo(() => ({
+    position: new THREE.Vector3(),
+    target: new THREE.Vector3(),
+    lookAt: new THREE.Vector3(),
+  }), []);
+
+  useFrame(({ camera }, delta) => {
+    const { east, north, phase } = simulation;
+    const { position, target, lookAt } = view;
+    let shot;
+
+    if (east.x < -93) {
+      shot = 'eastAvenue';
+      setCase1EntryShot(east, position, target);
+      // Sightline through the open side of the perimeter building.
+      position.set(Math.max(-101, east.x + 8), 3.2, -7.1);
+    } else if (east.x >= -47 && east.x < -28) {
+      // A short look at the northbound queue during the eastbound green.
+      shot = 'northQueue';
+      position.set(-.8, 8.3, Math.min(64, north.z + 13));
+      target.set(north.x, 1.1, north.z - 5);
+    } else if (phase === 'approach' || phase === 'eastGreen' || phase === 'eastClearance') {
+      shot = 'eastCorridor';
+      position.set(east.x + 12, 12, 5.2);
+      target.set(east.x + .5, east.y + 1.3, east.z);
+    } else {
+      shot = 'junction';
+      position.set(-8, 50, 19);
+      target.set(-7, 0, 9);
+    }
+
+    if (shot !== previousShot.current) {
+      // Cut between the two approaches. A camera flight would cross buildings.
+      previousShot.current = shot;
+      camera.position.copy(position);
+      lookAt.copy(target);
+    } else {
+      const blend = 1 - Math.exp(-4 * delta);
+      camera.position.lerp(position, blend);
+      lookAt.lerp(target, blend);
+    }
+    camera.lookAt(lookAt);
+  }, -0.5);
 
   return null;
 }
@@ -578,6 +640,9 @@ export function Canvas3D({
   ambulancePosition,
   ambulanceA,
   ambulanceB,
+  case2,
+  onCase2Change,
+  onEditScenario,
   activeCamFollow = 'detour',
   onSetCamFollow,
   isSimulationRunning = false,
@@ -588,7 +653,6 @@ export function Canvas3D({
   nYellow=false, sYellow=false, eYellow=false, wYellow=false
 }) {
   const [isFreeRoam, setIsFreeRoam] = useState(false);
-  const [editMode, setEditMode] = useState(false);
   const [boundaryMode, setBoundaryMode] = useState(false);
   const [isRoadCam, setIsRoadCam] = useState(false);
   const [localCamMode, setLocalCamMode] = useState(activeCamFollow || 'detour');
@@ -606,7 +670,6 @@ export function Canvas3D({
     setLocalCamMode(mode);
     setIsRoadCam(false);
     setIsFreeRoam(false);
-    setEditMode(false);
     setBoundaryMode(false);
     if (onSetCamFollow) onSetCamFollow(mode);
   };
@@ -617,7 +680,6 @@ export function Canvas3D({
       if (e.code === 'KeyV' || e.key === 'v' || e.key === 'V') {
         setIsRoadCam((prev) => !prev);
         setIsFreeRoam(false);
-        setEditMode(false);
         setBoundaryMode(false);
       }
       if (e.code === 'KeyC' || e.key === 'c' || e.key === 'C') {
@@ -634,32 +696,29 @@ export function Canvas3D({
         setCameraMode('overview');
       }
       if (e.code === 'KeyE' || e.key === 'e' || e.key === 'E') {
-        setEditMode(prev => !prev);
-        setBoundaryMode(false);
-        setIsRoadCam(false);
+        if (!e.repeat && !e.target?.closest?.('input,select,textarea,[contenteditable]')) onEditScenario?.();
       }
       if (e.code === 'KeyB' || e.key === 'b' || e.key === 'B') {
         setBoundaryMode(prev => !prev);
-        setEditMode(false);
         setIsRoadCam(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onSetCamFollow]);
+  }, [onSetCamFollow, onEditScenario]);
 
-  const showOrbitControls = editMode || boundaryMode;
+  const showOrbitControls = boundaryMode;
 
   const modeLabel = isFrozen
     ? 'FROZEN (Press F to Unfreeze)'
     : isRoadCam
     ? 'CCTV ROAD CAM (AI Vision Active)'
-    : editMode
-    ? 'EDIT MODE (Unlocked)'
     : boundaryMode
     ? 'BOUNDARY MODE (Unlocked)'
     : isFreeRoam
     ? 'FREE ROAM ([WASD] Fly | [Mouse] Look | [Ctrl] Unlock Mouse | [C] Exit)'
+    : case2
+    ? 'CASE 02 JUNCTION OVERVIEW'
     : selectedCase === 3
     ? localCamMode === 'corridor'
       ? 'CAM: AMBULANCE A CORRIDOR (South)'
@@ -669,14 +728,14 @@ export function Canvas3D({
     : 'CINEMATIC';
 
   // Primary position to pass to TrafficManager for yield evaluation
-  const primaryAmbPos = selectedCase === 3
+  const primaryAmbPos = case2 ? case2.east : selectedCase === 3
     ? (ambulanceA?.position || { x: 2.2, y: 0.5, z: 90.0 })
     : (ambulancePosition || { x: -120, y: 0.5, z: -6.0 });
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
       <Canvas
-        dpr={[1, 1.5]}
+        dpr={case2 ? 1 : [1, 1.5]}
         gl={{ powerPreference: "high-performance", antialias: true, stencil: false }}
         shadows={{ type: THREE.PCFShadowMap }}
         camera={{ position: [0, 50, 150], fov: 45 }}
@@ -706,7 +765,20 @@ export function Canvas3D({
         <Suspense fallback={<Loader />}>
           <CityScene isPreempted={isPreempted} />
           
-          {selectedCase === 3 ? (
+          {case2 ? (
+            <>
+              {case2.phase !== 'complete' && <><Ambulance3D
+                position={case2.east}
+                floatingLabel="High Priority"
+                corridorActive={case2.phase === 'eastGreen'}
+                ringColor="#38bdf8"
+                ringRadius={CASE2_EAST_YIELD_RADIUS}
+                showRing={case2.phase === 'eastGreen'}
+                livePosition
+              />
+              <Ambulance3D position={case2.north} livePosition showRing={false} /></>}
+            </>
+          ) : selectedCase === 3 ? (
             <>
               {/* Dual Ambulances for Case 3 */}
               <Ambulance3D position={ambulanceA?.position} ringColor="#3b82f6" label="AMB A (PRIORITY)" />
@@ -731,9 +803,10 @@ export function Canvas3D({
             nGreen={nGreen} sGreen={sGreen} eGreen={eGreen} wGreen={wGreen}
             nYellow={nYellow} sYellow={sYellow} eYellow={eYellow} wYellow={wYellow}
             isFrozen={isFrozen}
-            editMode={editMode}
             boundaryMode={boundaryMode}
             externalVehiclesRef={vehiclesRef}
+            case2={case2}
+            onCase2Change={onCase2Change}
           />
           <ComputerVisionOverlay
             canvasRef={cvCanvasRef}
@@ -769,6 +842,8 @@ export function Canvas3D({
           <FreeRoamFlightCamera />
         ) : isRoadCam ? (
           <AmbulanceApproachCamera ambulancePosition={primaryAmbPos} isSimulationRunning={isSimulationRunning} />
+        ) : case2 ? (
+          <Case2CinematicCamera simulation={case2} />
         ) : selectedCase === 3 ? (
           localCamMode === 'corridor' ? (
             <Case3CorridorCamera ambulanceA={ambulanceA} />
@@ -783,15 +858,17 @@ export function Canvas3D({
       </Canvas>
 
       {/* ── 2D HUD OVERLAYS (Positioned over Canvas) ── */}
-      <div className="camera-panel" style={{ position: 'fixed', top: '72px', right: '20px', pointerEvents: 'auto', zIndex: 50 }}>
+      <div className="camera-panel" style={{ position: 'fixed', top: case2 ? '20px' : '72px', right: '20px', pointerEvents: 'auto', zIndex: 50 }}>
         <div className="bg-black/90 text-emerald-400 p-3 rounded-lg border border-emerald-500 font-mono text-sm whitespace-nowrap shadow-2xl backdrop-blur-md">
-          <div className="mb-2 text-xs text-emerald-500 font-bold flex items-center justify-between gap-4">
-            <span>View · <span className="text-white font-semibold">{modeLabel}</span></span>
+          <div className={`${case2 ? '' : 'mb-2'} text-xs text-emerald-500 font-bold flex items-center justify-between gap-4`}>
+            {!case2 && <span>MODE: <span className="text-white font-semibold">{modeLabel}</span></span>}
+            <button onClick={onEditScenario} className="rounded border border-emerald-500/50 bg-emerald-950/60 px-2.5 py-1 text-[11px] text-emerald-300">
+              [E] Edit scenario
+            </button>
             <button
               onClick={() => {
                 setIsRoadCam(prev => !prev);
                 setIsFreeRoam(false);
-                setEditMode(false);
                 setBoundaryMode(false);
               }}
               className={`px-2.5 py-1 rounded text-[11px] font-bold border transition ${
@@ -841,13 +918,16 @@ export function Canvas3D({
             </div>
           )}
 
-          <div className="text-xs text-slate-400 mb-1 flex items-center gap-2">
-            
-            <span className="cursor-pointer hover:text-white" onClick={() => setIsFreeRoam(prev => !prev)}>[C] Free Roam</span> |
-            <span>[F] Freeze</span> |
-            <span className="cursor-pointer hover:text-white" onClick={() => setIsRoadCam(prev => !prev)}>[V] Road Cam</span>
-          </div>
-          <strong>CAMERA:</strong> <span ref={camTrackerTextRef} className="text-slate-200">Loading...</span>
+          {!case2 && (
+            <>
+              <div className="text-xs text-slate-400 mb-1 flex items-center gap-2">
+                <span className="cursor-pointer hover:text-white" onClick={() => setIsFreeRoam(prev => !prev)}>[C] Free Roam</span> |
+                <span>[F] Freeze</span> |
+                <span className="cursor-pointer hover:text-white" onClick={() => setIsRoadCam(prev => !prev)}>[V] Road Cam</span>
+              </div>
+              <strong>CAMERA:</strong> <span ref={camTrackerTextRef} className="text-slate-200">Loading...</span>
+            </>
+          )}
         </div>
       </div>
 
