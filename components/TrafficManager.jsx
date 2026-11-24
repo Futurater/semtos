@@ -14,7 +14,7 @@ const JX_MAX =  3.5;  // East edge of N/S road
 const JZ_MIN = -9.5;  // South edge of E/W road
 const JZ_MAX =  9.5;  // North edge of E/W road
 
-export function TrafficManager({ selectedCase = 1, ambulancePosition, isPreempted, nGreen=false, sGreen=false, eGreen=false, wGreen=false, nYellow=false, sYellow=false, eYellow=false, wYellow=false, isFrozen, editMode, boundaryMode, externalVehiclesRef, case2, onCase2Change }) {
+export function TrafficManager({ selectedCase = 1, ambulancePosition, isPreempted, nGreen=false, sGreen=false, eGreen=false, wGreen=false, nYellow=false, sYellow=false, eYellow=false, wYellow=false, isFrozen, boundaryMode, externalVehiclesRef, case2, onCase2Change }) {
   // ── ROAD BOUNDARIES (FOOTPATH PROTECTION) ──
   const [boundaries, setBoundaries] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -240,7 +240,7 @@ export function TrafficManager({ selectedCase = 1, ambulancePosition, isPreempte
   }, [vehicles, models, case2Active]);
 
   useFrame((state, delta) => {
-    if (editMode || boundaryMode || isFrozen) return;
+    if (boundaryMode || isFrozen) return;
 
     if (case2) {
       const { phase, northStatus } = case2;
@@ -716,53 +716,6 @@ export function TrafficManager({ selectedCase = 1, ambulancePosition, isPreempte
           </mesh>
         </TransformControls>
       </group>
-    );
-  }
-
-  if (editMode) {
-    return (
-      <>
-        {vehiclesRef.current.map((veh, idx) => {
-          const modelConfig = models[veh.modelIdx % models.length];
-          let baseRot = 0;
-          if (veh.type === 'E') baseRot = Math.PI / 2;
-          if (veh.type === 'W') baseRot = -Math.PI / 2;
-          if (veh.type === 'S') baseRot = 0;
-          if (veh.type === 'N') baseRot = Math.PI;
-
-          return (
-            <React.Fragment key={`edit-${veh.id}`}>
-              <group ref={meshRefs.current[idx]} position={veh.pos.toArray()}>
-                <group
-                  scale={[0.6, 0.6, 0.6]}
-                  rotation={[0, baseRot + modelConfig.yOffsetRot, 0]}
-                >
-                  <primitive object={modelConfig.scene.clone(true)} />
-                </group>
-                <mesh position={[0, 2.2, 0]}>
-                  <sphereGeometry args={[0.22, 12, 12]} />
-                  <meshBasicMaterial color="#ef4444" />
-                </mesh>
-              </group>
-
-              <TransformControls
-                object={meshRefs.current[idx]}
-                mode="translate"
-                showY={false}
-                onMouseUp={() => {
-                  const g = meshRefs.current[idx]?.current;
-                  if (g) {
-                    const { x, z } = g.position;
-                    console.log(
-                      `✅ Car ${veh.id} [${veh.type}] → X: ${x.toFixed(2)}, Z: ${z.toFixed(2)}`
-                    );
-                  }
-                }}
-              />
-            </React.Fragment>
-          );
-        })}
-      </>
     );
   }
 

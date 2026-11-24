@@ -45,9 +45,12 @@ function elevation(profile, coordinate) {
 }
 
 function setRoadHeight(vehicle, type, dt) {
-  const ew = type === 'E' || type === 'W';
-  const target = elevation(ew ? EAST_SURFACE : NORTH_SURFACE, ew ? vehicle.x : vehicle.z);
+  const target = scenarioRoadHeight(vehicle.x, vehicle.z, type);
   vehicle.y = dt === undefined ? target : MathUtils.damp(vehicle.y, target, 12, dt);
+}
+
+export function scenarioRoadHeight(x, z, heading) {
+  return heading === 'E' || heading === 'W' ? elevation(EAST_SURFACE, x) : elevation(NORTH_SURFACE, z);
 }
 
 function footprint(heading, steering, size = CAR) {

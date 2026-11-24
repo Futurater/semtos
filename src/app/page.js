@@ -9,6 +9,8 @@ import { useHardwareSerial } from '../../hooks/useHardwareSerial';
 import { useHardwareWifi } from '../../hooks/useHardwareWifi';
 import { Canvas3D } from '../../components/Canvas3D';
 import { createCase2Simulation } from '../../components/case2Simulation';
+import { ScenarioWorkbench } from '../../components/ScenarioWorkbench';
+import { HEADINGS, prepareImportedScenario, scenarioVehicle } from '../../components/scenarioTraffic';
 
 function Case2HUD({ simulation, frozen, dispatch, toggleFreeze, onBackToMenu }) {
   const { phase, northStatus } = simulation;
@@ -322,13 +324,15 @@ function Case3TelemetryHUD({ case3, onBackToMenu, onSwitchCase }) {
 export default function Dashboard() {
   const [started, setStarted] = useState(false);
   const [selectedCase, setSelectedCase] = useState(1);
+  const [editor, setEditor] = useState(null);
+  const scenarioLayouts = useRef({});
 
   // Case 1 Hooks
-  const case1Stream = useTrafficStream(selectedCase === 1);
+  const case1Stream = useTrafficStream(selectedCase === 1 && !editor);
   const case1Signal = useTrafficSignal();
 
   // Case 3 Hook
-  const case3 = useCase3TrafficStream(selectedCase === 3);
+  const case3 = useCase3TrafficStream(selectedCase === 3 && !editor);
   const [case2, setCase2] = useState(createCase2Simulation);
   const [case2Frozen, setCase2Frozen] = useState(false);
   const [, setCase2Revision] = useState(0);
@@ -342,7 +346,7 @@ export default function Dashboard() {
   const toggleCase2Freeze = useCallback(() => setCase2Frozen(frozen => !frozen), []);
 
   useEffect(() => {
-    if (!started || selectedCase !== 2) return;
+    if (!started || selectedCase !== 2 || editor) return;
     const onKeyDown = (event) => {
       if (event.repeat || event.target?.closest?.('input,textarea,select,[contenteditable]')) return;
       if (event.code === 'Enter') {
@@ -355,14 +359,42 @@ export default function Dashboard() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [started, selectedCase, case2, dispatchCase2, toggleCase2Freeze]);
+  }, [started, selectedCase, editor, case2, dispatchCase2, toggleCase2Freeze]);
 
   const vehiclesRef = useRef([]);
 
+  const beginEdit = useCallback(() => {
+    const saved = scenarioLayouts.current[selectedCase];
+    if (saved) {
+      setEditor({ vehicles: saved, resume: false });
+      return;
+    }
+    const traffic = (selectedCase === 2 ? case2.cars : vehiclesRef.current).map(car =>
+      scenarioVehicle(`Car ${car.id}`, 'car', car.pos.x, car.pos.z, car.type, car.modelIdx, car.pos.y)
+    );
+    const ambulances = selectedCase === 1 ? [case1Stream.ambulancePosition]
+      : selectedCase === 2 ? [case2.east, case2.north] : [case3.ambulanceA.position, case3.ambulanceB.position];
+    for (const [index, position] of ambulances.entries()) {
+      const heading = Object.keys(HEADINGS).reduce((best, direction) =>
+        Math.cos(position.rotation - HEADINGS[direction].rotation) > Math.cos(position.rotation - HEADINGS[best].rotation)
+          ? direction : best, 'N');
+      traffic.push(scenarioVehicle(`Ambulance ${index + 1}`, 'ambulance', position.x, position.z, heading, 0, position.y));
+    }
+    const running = selectedCase === 1 ? case1Stream.isSimulationRunning && !case1Stream.isFrozen
+      : selectedCase === 2 ? case2.phase !== 'ready' && case2.phase !== 'complete' && !case2Frozen
+      : case3.isSimulationRunning && !case3.isFrozen;
+    setEditor({ ...prepareImportedScenario(traffic), resume: running });
+  }, [selectedCase, case1Stream, case2, case2Frozen, case3]);
+
   const handleRemoteCommand = useCallback((command, payload) => {
     if ((command === 'SWITCH_CASE' || command === 'SET_CASE') && (payload.caseId || payload.caseNumber)) {
-      setSelectedCase(payload.caseId || payload.caseNumber);
+      const number = Number(payload.caseId || payload.caseNumber);
+      if (![1, 2, 3, 4].includes(number)) return;
+      setEditor(null);
+      setSelectedCase(number);
       setStarted(true);
+    } else if (editor || selectedCase === 4) {
+      return;
     } else if (command === 'DISPATCH') {
       setStarted(true);
       if (selectedCase === 1) {
@@ -381,7 +413,7 @@ export default function Dashboard() {
         case1Stream.toggleFreeze?.();
       }
     }
-  }, [selectedCase, case1Stream, case1Signal, case3, dispatchCase2]);
+  }, [selectedCase, editor, case1Stream, case1Signal, case3, dispatchCase2]);
 
   // ESP32 Web Serial Hardware Synchronization (Zero-Fail Fallback)
   const {
@@ -430,7 +462,7 @@ export default function Dashboard() {
 
   // Live 20Hz V2X Telemetry Broadcaster to /ambulance and /driver dashboards
   useV2XBroadcaster({
-    selectedCase,
+    selectedCase: editor ? 4 : selectedCase,
     case1Stream,
     case1Signal,
     case3,
@@ -459,6 +491,7 @@ export default function Dashboard() {
 
   // Synchronize simulation signal states in real-time to physical ESP32
   useEffect(() => {
+    if (editor || selectedCase === 4) return;
     let targetByte = 'R';
 
     if (selectedCase === 1) {
@@ -507,6 +540,7 @@ export default function Dashboard() {
     sendWifiCommand(targetByte);
   }, [
     selectedCase,
+    editor,
     case1Signal.phase,
     case1Signal.signalPhase,
     case1Signal.wGreen,
@@ -548,6 +582,15 @@ export default function Dashboard() {
       color: '#f59e0b',
       available: true
     },
+    {
+      id: 4,
+      label: 'CASE 04',
+      title: 'Custom Scenario Builder',
+      description: 'Place vehicles in an empty city, choose their headings, and run your own traffic and emergency scenarios.',
+      tags: ['Vehicle Placement', 'Reactive Drivers'],
+      color: '#a78bfa',
+      available: true
+    },
   ];
 
   if (!started) {
@@ -563,6 +606,8 @@ export default function Dashboard() {
             <div key={c.id} onClick={()=>{
                 if (c.available) {
                   setSelectedCase(c.id);
+                  const saved = scenarioLayouts.current[c.id];
+                  setEditor(saved ? { vehicles: saved, resume: false } : null);
                   setStarted(true);
                 }
               }}
@@ -590,6 +635,21 @@ export default function Dashboard() {
     );
   }
 
+  if (editor || selectedCase === 4) {
+    return (
+      <ScenarioWorkbench
+        key={selectedCase}
+        caseNumber={selectedCase}
+        initialVehicles={editor?.vehicles || scenarioLayouts.current[selectedCase] || []}
+        resumeOnEdit={editor?.resume ?? false}
+        importAdjustments={editor?.adjusted ?? 0}
+        onSave={vehicles => { scenarioLayouts.current[selectedCase] = vehicles; }}
+        onMenu={() => { setEditor(null); setStarted(false); }}
+        onOriginal={selectedCase !== 4 ? () => setEditor(null) : undefined}
+      />
+    );
+  }
+
   const case2Signals = {
     phase: case2.phase,
     eGreen: case2.phase === 'eastGreen',
@@ -602,6 +662,7 @@ export default function Dashboard() {
       <div className="absolute inset-0 z-0">
         <Canvas3D
           selectedCase={selectedCase}
+          onEditScenario={beginEdit}
           vehiclesRef={vehiclesRef}
           ambulancePosition={case1Stream.ambulancePosition}
           ambulanceA={case3.ambulanceA}

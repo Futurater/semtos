@@ -77,6 +77,8 @@ export function useCase3TrafficStream(active = true) {
   });
 
   const simRunningRef = useRef(false);
+  const activeRef = useRef(active);
+  activeRef.current = active;
   const isFrozenRef   = useRef(false);
   const trafficCycleActiveRef = useRef(false);
   const cycleArmIndexRef = useRef(0);
@@ -198,7 +200,7 @@ export function useCase3TrafficStream(active = true) {
     let lastHudUpdate = 0; // timestamp of last setState call (ms)
 
     const interval = setInterval(() => {
-      if (!simRunningRef.current || isFrozenRef.current) return;
+      if (!activeRef.current || !simRunningRef.current || isFrozenRef.current) return;
 
       // ────────────────────────────────────────────────────────────────────────
       // 0. Post-Clearance Normal Traffic Signal Orchestration (Case 1 Functionality)

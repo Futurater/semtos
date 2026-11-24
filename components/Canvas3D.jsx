@@ -631,6 +631,7 @@ export function Canvas3D({
   ambulanceB,
   case2,
   onCase2Change,
+  onEditScenario,
   activeCamFollow = 'detour',
   onSetCamFollow,
   isSimulationRunning = false,
@@ -641,7 +642,6 @@ export function Canvas3D({
   nYellow=false, sYellow=false, eYellow=false, wYellow=false
 }) {
   const [isFreeRoam, setIsFreeRoam] = useState(false);
-  const [editMode, setEditMode] = useState(false);
   const [boundaryMode, setBoundaryMode] = useState(false);
   const [isRoadCam, setIsRoadCam] = useState(false);
   const [localCamMode, setLocalCamMode] = useState(activeCamFollow || 'detour');
@@ -659,7 +659,6 @@ export function Canvas3D({
     setLocalCamMode(mode);
     setIsRoadCam(false);
     setIsFreeRoam(false);
-    setEditMode(false);
     setBoundaryMode(false);
     if (onSetCamFollow) onSetCamFollow(mode);
   };
@@ -669,7 +668,6 @@ export function Canvas3D({
       if (e.code === 'KeyV' || e.key === 'v' || e.key === 'V') {
         setIsRoadCam((prev) => !prev);
         setIsFreeRoam(false);
-        setEditMode(false);
         setBoundaryMode(false);
       }
       if (e.code === 'KeyC' || e.key === 'c' || e.key === 'C') {
@@ -686,28 +684,23 @@ export function Canvas3D({
         setCameraMode('overview');
       }
       if (e.code === 'KeyE' || e.key === 'e' || e.key === 'E') {
-        setEditMode(prev => !prev);
-        setBoundaryMode(false);
-        setIsRoadCam(false);
+        if (!e.repeat && !e.target?.closest?.('input,select,textarea,[contenteditable]')) onEditScenario?.();
       }
       if (e.code === 'KeyB' || e.key === 'b' || e.key === 'B') {
         setBoundaryMode(prev => !prev);
-        setEditMode(false);
         setIsRoadCam(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onSetCamFollow]);
+  }, [onSetCamFollow, onEditScenario]);
 
-  const showOrbitControls = editMode || boundaryMode;
+  const showOrbitControls = boundaryMode;
 
   const modeLabel = isFrozen
     ? 'FROZEN (Press F to Unfreeze)'
     : isRoadCam
     ? 'CCTV ROAD CAM (AI Vision Active)'
-    : editMode
-    ? 'EDIT MODE (Unlocked)'
     : boundaryMode
     ? 'BOUNDARY MODE (Unlocked)'
     : isFreeRoam
@@ -798,7 +791,6 @@ export function Canvas3D({
             nGreen={nGreen} sGreen={sGreen} eGreen={eGreen} wGreen={wGreen}
             nYellow={nYellow} sYellow={sYellow} eYellow={eYellow} wYellow={wYellow}
             isFrozen={isFrozen}
-            editMode={editMode}
             boundaryMode={boundaryMode}
             externalVehiclesRef={vehiclesRef}
             case2={case2}
@@ -858,11 +850,13 @@ export function Canvas3D({
         <div className="bg-black/90 text-emerald-400 p-3 rounded-lg border border-emerald-500 font-mono text-sm whitespace-nowrap shadow-2xl backdrop-blur-md">
           <div className={`${case2 ? '' : 'mb-2'} text-xs text-emerald-500 font-bold flex items-center justify-between gap-4`}>
             {!case2 && <span>MODE: <span className="text-white font-semibold">{modeLabel}</span></span>}
+            <button onClick={onEditScenario} className="rounded border border-emerald-500/50 bg-emerald-950/60 px-2.5 py-1 text-[11px] text-emerald-300">
+              [E] Edit scenario
+            </button>
             <button
               onClick={() => {
                 setIsRoadCam(prev => !prev);
                 setIsFreeRoam(false);
-                setEditMode(false);
                 setBoundaryMode(false);
               }}
               className={`px-2.5 py-1 rounded text-[11px] font-bold border transition ${

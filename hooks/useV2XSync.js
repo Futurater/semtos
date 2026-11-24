@@ -590,7 +590,7 @@ export function useV2XBroadcaster({
 
   // 20Hz Telemetry Publisher
   useEffect(() => {
-    if (typeof window === 'undefined' || selectedCase === 2) return;
+    if (typeof window === 'undefined' || selectedCase === 2 || selectedCase === 4) return;
 
     const interval = setInterval(() => {
       const c1Pos = case1Stream?.ambulancePosition || { x: -120, y: 0.5, z: -6.0, rotation: -Math.PI / 2 };
