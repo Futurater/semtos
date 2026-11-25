@@ -21,6 +21,8 @@ export function useHardwareWifi() {
   const lastSentRef = useRef(null);
   const espIpRef = useRef('192.168.4.1');
   const isWifiEnabledRef = useRef(false);
+  const isSendingRef = useRef(false);
+  const pendingCmdRef = useRef(null);
 
   // Restore saved settings from localStorage on mount
   useEffect(() => {
@@ -39,7 +41,7 @@ export function useHardwareWifi() {
   }, []);
 
   const updateEspIp = useCallback((newIp) => {
-    const cleanIp = newIp.trim().replace(/^https?:\/\//i, '').replace(/[:\/].*$/, '');
+    const cleanIp = newIp.trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
     setEspIp(cleanIp);
     espIpRef.current = cleanIp;
     if (typeof window !== 'undefined') {
@@ -52,11 +54,14 @@ export function useHardwareWifi() {
     setIsWifiEnabled(prev => {
       const next = typeof forcedState === 'boolean' ? forcedState : !prev;
       isWifiEnabledRef.current = next;
+      lastSentRef.current = null;
+      pendingCmdRef.current = null;
       if (typeof window !== 'undefined') {
         localStorage.setItem('semtos_wifi_enabled', next ? 'true' : 'false');
       }
       if (!next) {
         setWifiStatus('IDLE');
+        setLastWifiByteSent(null);
         setLastError(null);
       }
       return next;
@@ -138,46 +143,66 @@ export function useHardwareWifi() {
 
   /**
    * Dispatch single-character command over Wi-Fi
-   * Deduplicates commands to prevent flooding network buffer
+   * Deduplicates unchanged commands and coalesces rapid phase flips in order.
    */
   const sendWifiCommand = useCallback(async (cmd) => {
     if (!cmd) return;
     const validBytes = ['R', 'Y', 'G', 'P'];
     if (!validBytes.includes(cmd)) return;
+    if (!isWifiEnabledRef.current || !espIpRef.current) return;
 
-    // Deduplicate: ignore if unchanged
+    // Deduplicate only while actively sending to an enabled ESP32 target
     if (cmd === lastSentRef.current) return;
     lastSentRef.current = cmd;
     setLastWifiByteSent(cmd);
 
-    if (!isWifiEnabledRef.current || !espIpRef.current) return;
+    if (isSendingRef.current) {
+      pendingCmdRef.current = cmd;
+      return;
+    }
+    isSendingRef.current = true;
 
-    const targetIp = espIpRef.current;
-    setWifiStatus('SENDING');
+    try {
+      let nextCmd = cmd;
+      while (nextCmd && isWifiEnabledRef.current && espIpRef.current) {
+        pendingCmdRef.current = null;
+        const targetIp = espIpRef.current;
+        setWifiStatus('SENDING');
+        const result = await executeHttpDispatch(targetIp, nextCmd);
+        if (!isWifiEnabledRef.current) break;
 
-    const result = await executeHttpDispatch(targetIp, cmd);
-
-    if (result.success) {
-      setLastResponseTime(result.latency);
-      setWifiStatus('LINKED');
-      setLastError(null);
-    } else {
-      console.warn(`[Wi-Fi V2I] Failed sending '${cmd}' to ${targetIp}:`, result.error);
-      setWifiStatus('ERROR');
-      setLastError(result.error);
+        if (result.success) {
+          setLastResponseTime(result.latency);
+          setWifiStatus('LINKED');
+          setLastError(null);
+        } else {
+          console.warn(`[Wi-Fi V2I] Failed sending '${nextCmd}' to ${targetIp}:`, result.error);
+          setWifiStatus('ERROR');
+          setLastError(result.error);
+        }
+        nextCmd = pendingCmdRef.current;
+      }
+    } finally {
+      isSendingRef.current = false;
     }
   }, [executeHttpDispatch]);
 
   /**
    * Manual Test Override
    */
-  const testPing = useCallback(async (cmd = 'P') => {
-    const targetIp = espIpRef.current;
+  const testPing = useCallback(async (cmd = 'P', overrideIp) => {
+    const cleanOverride = overrideIp
+      ? String(overrideIp).trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '')
+      : '';
+    const targetIp = cleanOverride || espIpRef.current;
     if (!targetIp) return false;
     setWifiStatus('SENDING');
     const result = await executeHttpDispatch(targetIp, cmd);
 
     if (result.success) {
+      if (cleanOverride && cleanOverride !== espIpRef.current) {
+        updateEspIp(cleanOverride);
+      }
       setLastResponseTime(result.latency);
       setWifiStatus('LINKED');
       setLastWifiByteSent(cmd);
@@ -189,7 +214,7 @@ export function useHardwareWifi() {
       setLastError(result.error);
       return false;
     }
-  }, [executeHttpDispatch]);
+  }, [executeHttpDispatch, updateEspIp]);
 
   return {
     espIp,

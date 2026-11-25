@@ -37,7 +37,7 @@ export function reportDeparture(input) {
     if (!value || value.length > limit) throw new TypeError('Complete each field within its character limit.');
     unit[key] = value;
   }
-  if (!Object.hasOwn(urgencyRank, input.urgency)) throw new TypeError('Select a dispatch urgency.');
+  if (!Object.hasOwn(urgencyRank, input?.urgency)) throw new TypeError('Select a dispatch urgency.');
   unit.urgency = input.urgency;
   const db = getDatabase();
   const id = randomUUID();

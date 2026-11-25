@@ -17,10 +17,11 @@ export async function GET(request) {
       // Skip IPv6 and internal loopback addresses
       if (iface.family === 'IPv4' && !iface.internal && !iface.address.startsWith('169.254.')) {
         const lowerName = name.toLowerCase();
+        const isVirtual = /vethernet|virtual|vmware|vbox|wsl|docker|hyper-v/.test(lowerName);
         // Prioritize Wi-Fi / Wireless adapters
         if (lowerName.includes('wi-fi') || lowerName.includes('wireless') || lowerName.includes('wlan')) {
           wifiIp = iface.address;
-        } else if (candidateIp === '127.0.0.1') {
+        } else if (!isVirtual && candidateIp === '127.0.0.1') {
           candidateIp = iface.address;
         }
       }

@@ -49,17 +49,20 @@ export async function POST(request) {
       if (body.command === 'DISPATCH') {
         const dispatch = getOpenDispatch(payload.dispatchId);
         if (!dispatch) return NextResponse.json({ error: 'An open coordination assignment is required.' }, { status: 400 });
-        if (!store.snapshot || Date.now() - store.lastUpdated >= 1500) {
+        if (!store.snapshot || Date.now() - store.lastUpdated >= 4500) {
           return NextResponse.json({ error: 'The dashboard disconnected. Try again in standalone mode.' }, { status: 409 });
         }
         const state = store.snapshot;
         if (state.dispatch?.id === dispatch.id) return NextResponse.json({ ok: true });
         const queued = store.pendingCommands.find(cmd =>
           cmd.command === 'DISPATCH' && Date.now() - cmd.timestamp < 8000);
-        if (queued?.payload.dispatch.id === dispatch.id) return NextResponse.json({ ok: true });
+        if (queued?.payload?.dispatch?.id === dispatch.id) return NextResponse.json({ ok: true });
         if (queued) return NextResponse.json({ error: 'Another dispatch is waiting for the dashboard.' }, { status: 409 });
-        const active = dispatch.caseId === 1 ? state.case1?.isSimulationRunning :
-          state.case3?.isSimulationRunning && !state.case3?.trafficCycleActive;
+        const active = Boolean(
+          state.case1?.isSimulationRunning ||
+          state.case2?.isSimulationRunning ||
+          (state.case3?.isSimulationRunning && !state.case3?.trafficCycleActive)
+        );
         if (active) return NextResponse.json({ error: 'A dispatch is already active in this scenario.' }, { status: 409 });
         payload = { dispatch };
       }

@@ -18,15 +18,26 @@ export async function GET(request) {
     );
   }
 
-  // Sanitize IP: strip http://, ports, and trailing paths
-  const cleanIp = ip.trim().replace(/^https?:\/\//i, '').replace(/[:\/].*$/, '');
+  // Sanitize IP / optional port: strip http:// and trailing paths
+  const rawTarget = ip.trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
+  const hostMatch = /^([a-zA-Z0-9.-]+)(?::(\d{1,5}))?$/.exec(rawTarget);
+  const portNum = hostMatch?.[2] ? Number(hostMatch[2]) : null;
+  if (!hostMatch || (portNum !== null && (portNum < 1 || portNum > 65535))) {
+    return NextResponse.json(
+      { success: false, error: 'Invalid IP address or hostname' },
+      { status: 400 }
+    );
+  }
+  const cleanIp = hostMatch[0];
+  const normalizedCmd = String(cmd || 'R').toUpperCase();
+  const cleanCmd = ['R', 'Y', 'G', 'P'].includes(normalizedCmd) ? normalizedCmd : 'R';
 
   const start = Date.now();
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 1800); // 1.8-second timeout
 
-    const res = await fetch(`http://${cleanIp}/signal?cmd=${cmd}`, {
+    const res = await fetch(`http://${cleanIp}/signal?cmd=${cleanCmd}`, {
       method: 'GET',
       signal: controller.signal,
       cache: 'no-store'
@@ -41,7 +52,7 @@ export async function GET(request) {
       status: res.status,
       body: bodyText,
       ip: cleanIp,
-      cmd,
+      cmd: cleanCmd,
       latencyMs
     });
   } catch (err) {
@@ -55,7 +66,7 @@ export async function GET(request) {
       error: errorMsg,
       isTimeout,
       ip: cleanIp,
-      cmd
+      cmd: cleanCmd
     }, { status: 502 });
   }
 }

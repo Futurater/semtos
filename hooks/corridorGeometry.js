@@ -27,7 +27,8 @@ function sample(name, progress, offset) {
   let i = 1;
   while (i < distances.length - 1 && distances[i] < d) i++;
   const a = points[i - 1], b = points[i];
-  const t = (d - distances[i - 1]) / (distances[i] - distances[i - 1]);
+  const span = distances[i] - distances[i - 1];
+  const t = span ? (d - distances[i - 1]) / span : 0;
   const bearing = computeBearing(a, b);
   const point = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
   const laneCenter = lanes[name][i - 1] % 2 === 0 ? -1.5 : 0;

@@ -11,11 +11,11 @@ import CoordinationQueue from '../../components/CoordinationQueue';
 import OperationsHeader from '../../components/OperationsHeader';
 import { ArrowUpRight, Route, GitBranch, Timer, SlidersHorizontal, MapPin } from 'lucide-react';
 import { Canvas3D } from '../../components/Canvas3D';
-import { case2TrafficSignal, createCase2Simulation } from '../../components/case2Simulation';
+import { case2TrafficSignal, createCase2Simulation, stepCase2 } from '../../components/case2Simulation';
 import { ScenarioWorkbench } from '../../components/ScenarioWorkbench';
 import { HEADINGS, prepareImportedScenario, scenarioVehicle } from '../../components/scenarioTraffic';
 
-function Case2HUD({ simulation, frozen, dispatch, toggleFreeze, onBackToMenu }) {
+function Case2HUD({ simulation, frozen, dispatch, toggleFreeze, onReset, onBackToMenu, onSwitchCase }) {
   const { phase, northStatus } = simulation;
   const { eGreen: eastGreen, nGreen: northGreen, eYellow, nYellow } = case2TrafficSignal(simulation);
   const active = phase !== 'ready' && phase !== 'complete';
@@ -28,9 +28,13 @@ function Case2HUD({ simulation, frozen, dispatch, toggleFreeze, onBackToMenu }) 
 
   return (
     <section aria-label="Case 2 controls" className="twin-card twin-instrument text-xs">
+      <div className="instrument-nav">
+        <button onClick={onBackToMenu}>← Overview</button>
+        <button onClick={() => onSwitchCase(3)}>Switch case ↗</button>
+      </div>
       <div className="mb-3 flex items-center justify-between gap-2">
         <span className="font-bold text-blue-300">CASE 02 · DUAL AMBULANCE</span>
-        <button onClick={onBackToMenu} className="rounded bg-slate-800 px-2 py-1 text-slate-200">Menu</button>
+        {phase !== 'ready' && <button onClick={onReset} className="rounded bg-slate-800 px-2 py-1 text-slate-200">Reset</button>}
       </div>
       <div aria-live="polite" className="space-y-3">
         {[
@@ -64,7 +68,7 @@ function Case2HUD({ simulation, frozen, dispatch, toggleFreeze, onBackToMenu }) 
 function TwinPanel({ id, title, onBackToMenu, onSwitchCase, children }) {
   return <aside className="twin-card twin-instrument">
     <div className="instrument-nav"><button onClick={onBackToMenu}>← Overview</button>
-      <button onClick={() => onSwitchCase(id === 1 ? 3 : 1)}>Switch case ↗</button></div>
+      <button onClick={() => onSwitchCase(id === 1 ? 2 : id === 2 ? 3 : 1)}>Switch case ↗</button></div>
     <small>Simulation desk · Case 0{id}</small><h1>{title}</h1>{children}
   </aside>;
 }
@@ -76,22 +80,71 @@ function ArmSignals({ signals }) {
   })}</div>;
 }
 
-function Case1SignalHUD({ signals, stream, start, dispatch, onBackToMenu, onSwitchCase }) {
+function Case1SignalHUD({ signals, stream, start, dispatch, demoMode, onToggleDemo, onRunDemo, onResetDemo, onBackToMenu, onSwitchCase }) {
   const phase = signals.phase.replaceAll('_', ' ').toLowerCase();
   return <TwinPanel id={1} title="Ambulance priority" onBackToMenu={onBackToMenu} onSwitchCase={onSwitchCase}>
     <p className="instrument-note">M.G. Road · west approach</p>
-    <CoordinationQueue className="instrument-dispatch" start={start} currentDispatchId={dispatch?.id} busy={stream.isSimulationRunning}/>
+    {demoMode ? (
+      <div className="instrument-demo-controls">
+        <div className="mt-3 flex gap-2">
+          <button type="button" onClick={onRunDemo} disabled={stream.isSimulationRunning} className="instrument-dispatch !m-0 flex-1">
+            <span>{stream.isSimulationRunning ? 'Demo running' : 'Run demo'}</span><kbd>Enter</kbd>
+          </button>
+          {stream.isSimulationRunning && (
+            <button type="button" onClick={stream.toggleFreeze} className="px-2 py-2 text-xs">
+              {stream.isFrozen ? 'Resume [F]' : 'Pause [F]'}
+            </button>
+          )}
+          {(stream.isSimulationRunning || signals.phase !== 'ALL_RED') && (
+            <button type="button" onClick={onResetDemo} className="px-2 py-2 text-xs">Reset</button>
+          )}
+        </div>
+      </div>
+    ) : (
+      <CoordinationQueue className="instrument-dispatch" start={start} currentDispatchId={dispatch?.id} busy={stream.isSimulationRunning}/>
+    )}
+    <div className="instrument-stat">
+      <span>Demo mode</span>
+      <button type="button" aria-pressed={demoMode} onClick={() => onToggleDemo(!demoMode)} className="px-2 py-1 text-[11px]">
+        {demoMode ? 'On · skip intake' : 'Off · hospital queue'}
+      </button>
+    </div>
     <div className="instrument-stat"><span>Signal phase</span><strong>{phase}</strong></div>
     <ArmSignals signals={signals}/>
     {signals.phase.includes('RELEASE') && <div className="instrument-stat"><span>Next phase</span><strong>{signals.timeRemaining} s</strong></div>}
   </TwinPanel>;
 }
 
-function Case3TelemetryHUD({ case3, start, dispatch, onBackToMenu, onSwitchCase }) {
+function Case3TelemetryHUD({ case3, start, dispatch, demoMode, onToggleDemo, onRunDemo, onResetDemo, onBackToMenu, onSwitchCase }) {
   const { ambulanceA, ambulanceB, trafficCycleActive, signals, metrics } = case3;
+  const activeDispatch = case3.isSimulationRunning && !trafficCycleActive;
   return <TwinPanel id={3} title="Dual response" onBackToMenu={onBackToMenu} onSwitchCase={onSwitchCase}>
     <p className="instrument-note">Brigade corridor · Cubbon detour</p>
-    <CoordinationQueue className="instrument-dispatch" start={start} currentDispatchId={dispatch?.id} busy={case3.isSimulationRunning && !trafficCycleActive}/>
+    {demoMode ? (
+      <div className="instrument-demo-controls">
+        <div className="mt-3 flex gap-2">
+          <button type="button" onClick={onRunDemo} disabled={activeDispatch} className="instrument-dispatch !m-0 flex-1">
+            <span>{activeDispatch ? 'Demo running' : trafficCycleActive ? 'Run demo again' : 'Run demo'}</span><kbd>Enter</kbd>
+          </button>
+          {case3.isSimulationRunning && (
+            <button type="button" onClick={case3.toggleFreeze} className="px-2 py-2 text-xs">
+              {case3.isFrozen ? 'Resume [F]' : 'Pause [F]'}
+            </button>
+          )}
+          {case3.isSimulationRunning && (
+            <button type="button" onClick={onResetDemo} className="px-2 py-2 text-xs">Reset</button>
+          )}
+        </div>
+      </div>
+    ) : (
+      <CoordinationQueue className="instrument-dispatch" start={start} currentDispatchId={dispatch?.id} busy={activeDispatch}/>
+    )}
+    <div className="instrument-stat">
+      <span>Demo mode</span>
+      <button type="button" aria-pressed={demoMode} onClick={() => onToggleDemo(!demoMode)} className="px-2 py-1 text-[11px]">
+        {demoMode ? 'On · skip intake' : 'Off · hospital queue'}
+      </button>
+    </div>
     {trafficCycleActive ? <><div className="instrument-stat"><span>Both units delivered</span><strong>{signals.timeRemaining} s</strong></div><p>{signals.phaseLabel}</p><ArmSignals signals={signals}/></> :
       [ambulanceA, ambulanceB].map((unit, i) => <section className="instrument-unit" key={unit.id}>
         <div><strong>{i ? 'Unit B · Trauma' : 'Unit A · Cardiac'}</strong><small>{unit.status.replaceAll('_',' ').toLowerCase()}</small></div>
@@ -108,28 +161,135 @@ export default function Dashboard() {
   const [started, setStarted] = useState(false);
   const [selectedCase, setSelectedCase] = useState(1);
   const [dispatch, setDispatch] = useState(null);
+  const [demoMode, setDemoMode] = useState(false);
   const lastDispatchId = useRef(null);
   const [editor, setEditor] = useState(null);
   const scenarioLayouts = useRef({});
 
+  useEffect(() => {
+    try {
+      setDemoMode(window.localStorage.getItem('SEMTOS_DEMO_MODE_V1') === '1');
+    } catch (_) {}
+  }, []);
+
+  const updateDemoMode = useCallback((nextValue) => {
+    setDemoMode(prev => {
+      const next = typeof nextValue === 'function' ? Boolean(nextValue(prev)) : Boolean(nextValue);
+      try {
+        window.localStorage.setItem('SEMTOS_DEMO_MODE_V1', next ? '1' : '0');
+      } catch (_) {}
+      return next;
+    });
+  }, []);
+
   // Case 1 Hooks
-  const case1Stream = useTrafficStream(selectedCase === 1 && !editor);
+  const case1Stream = useTrafficStream(started && selectedCase === 1 && !editor);
   const case1Signal = useTrafficSignal();
 
   // Case 3 Hook
-  const case3 = useCase3TrafficStream(selectedCase === 3 && !editor);
+  const case3 = useCase3TrafficStream(started && selectedCase === 3 && !editor);
   const [case2, setCase2] = useState(createCase2Simulation);
   const [case2Frozen, setCase2Frozen] = useState(false);
   const [, setCase2Revision] = useState(0);
-  const onCase2Change = useCallback(() => setCase2Revision(value => value + 1), []);
+  const lastCase2FrameRef = useRef(0);
+  const onCase2Change = useCallback((shouldRender = true) => {
+    lastCase2FrameRef.current = performance.now();
+    if (shouldRender) setCase2Revision(value => value + 1);
+  }, []);
   const dispatchCase2 = useCallback(() => {
     setCase2Frozen(false);
+    lastCase2FrameRef.current = performance.now();
     setCase2(current => {
       if (current.phase !== 'ready' && current.phase !== 'complete') return current;
       return { ...createCase2Simulation(), phase: 'approach', northStatus: 'Approaching the junction' };
     });
   }, []);
   const toggleCase2Freeze = useCallback(() => setCase2Frozen(frozen => !frozen), []);
+  const resetCase2 = useCallback(() => {
+    setCase2(createCase2Simulation());
+    setCase2Frozen(false);
+  }, []);
+
+  const dispatchDemo = useCallback((requestedCase) => {
+    if (editor) return;
+    const target = [1, 2, 3].includes(requestedCase) ? requestedCase : selectedCase === 4 ? 1 : selectedCase;
+    lastDispatchId.current = null;
+    setDispatch(null);
+    case1Stream.resetCase1();
+    case1Signal.resetSignals();
+    setCase2(createCase2Simulation());
+    setCase2Frozen(false);
+    case3.resetCase3();
+    setEditor(null);
+    setSelectedCase(target);
+    setStarted(true);
+    if (target === 1) {
+      case1Stream.dispatchCase1();
+    } else if (target === 2) {
+      lastCase2FrameRef.current = performance.now();
+      setCase2({ ...createCase2Simulation(), phase: 'approach', northStatus: 'Approaching the junction' });
+    } else if (target === 3) {
+      case3.dispatchCase3();
+    }
+  }, [editor, selectedCase, case1Stream, case1Signal, case3]);
+
+  const resetDemo = useCallback((requestedCase) => {
+    const target = [1, 2, 3].includes(requestedCase) ? requestedCase : selectedCase;
+    lastDispatchId.current = null;
+    setDispatch(null);
+    case1Stream.resetCase1();
+    case1Signal.resetSignals();
+    setCase2(createCase2Simulation());
+    setCase2Frozen(false);
+    case3.resetCase3();
+    if ([1, 2, 3].includes(target)) {
+      setEditor(null);
+      setSelectedCase(target);
+      setStarted(true);
+    }
+  }, [selectedCase, case1Stream, case1Signal, case3]);
+
+  useEffect(() => {
+    if (!started || editor || !demoMode || (selectedCase !== 1 && selectedCase !== 3)) return;
+    const onDemoKeyDown = (event) => {
+      if (event.repeat || event.target?.closest?.('input,textarea,select,dialog,[contenteditable],button')) return;
+      if (event.code !== 'Enter') return;
+      if (selectedCase === 1 && !case1Stream.isSimulationRunning) {
+        event.preventDefault();
+        dispatchDemo(1);
+      } else if (selectedCase === 3 && (!case3.isSimulationRunning || case3.trafficCycleActive)) {
+        event.preventDefault();
+        dispatchDemo(3);
+      }
+    };
+    window.addEventListener('keydown', onDemoKeyDown);
+    return () => window.removeEventListener('keydown', onDemoKeyDown);
+  }, [started, editor, demoMode, selectedCase, case1Stream.isSimulationRunning, case3.isSimulationRunning, case3.trafficCycleActive, dispatchDemo]);
+
+  // Keep Case 2 progressing smoothly even when `/` is a background tab (e.g. while viewing /ambulance)
+  useEffect(() => {
+    if (!started || selectedCase !== 2 || editor || case2Frozen) return;
+    if (case2.phase === 'ready' || case2.phase === 'complete') return;
+
+    let lastStep = performance.now();
+    const timer = setInterval(() => {
+      const now = performance.now();
+      if (now - lastCase2FrameRef.current < 250) {
+        lastStep = now;
+        return;
+      }
+      let remaining = Math.min(1.0, Math.max(0.05, (now - lastStep) / 1000));
+      lastStep = now;
+      while (remaining > 0) {
+        const step = Math.min(remaining, 0.05);
+        stepCase2(case2, step);
+        remaining -= step;
+      }
+      setCase2Revision(value => value + 1);
+    }, 100);
+
+    return () => clearInterval(timer);
+  }, [started, selectedCase, editor, case2, case2Frozen, case2.phase]);
 
   useEffect(() => {
     if (!started || selectedCase !== 2 || editor) return;
@@ -172,28 +332,98 @@ export default function Dashboard() {
     setEditor({ ...prepareImportedScenario(traffic), resume: running });
   }, [selectedCase, case1Stream, case2, case2Frozen, case3]);
 
+  const backToOverview = useCallback(() => {
+    if (case1Stream.isSimulationRunning || case1Signal.phase !== 'ALL_RED') {
+      case1Stream.resetCase1();
+      case1Signal.resetSignals();
+      if (dispatch?.caseId === 1) {
+        lastDispatchId.current = null;
+        setDispatch(null);
+      }
+    }
+    if (case3.isSimulationRunning) {
+      case3.resetCase3();
+      if (dispatch?.caseId === 3) {
+        lastDispatchId.current = null;
+        setDispatch(null);
+      }
+    }
+    if (case2.phase !== 'ready') {
+      setCase2(createCase2Simulation());
+      setCase2Frozen(false);
+    }
+    setEditor(null);
+    setStarted(false);
+    if (selectedCase === 4) setSelectedCase(1);
+  }, [case1Stream, case1Signal, case3, case2.phase, dispatch?.caseId, selectedCase]);
+
+  const switchCase = useCallback((nextCase) => {
+    if (nextCase !== 1 && (case1Stream.isSimulationRunning || case1Signal.phase !== 'ALL_RED')) {
+      case1Stream.resetCase1();
+      case1Signal.resetSignals();
+      if (dispatch?.caseId === 1) {
+        lastDispatchId.current = null;
+        setDispatch(null);
+      }
+    }
+    if (nextCase !== 2 && case2.phase !== 'ready') {
+      setCase2(createCase2Simulation());
+      setCase2Frozen(false);
+    }
+    if (nextCase !== 3 && case3.isSimulationRunning) {
+      case3.resetCase3();
+      if (dispatch?.caseId === 3) {
+        lastDispatchId.current = null;
+        setDispatch(null);
+      }
+    }
+    setEditor(null);
+    setSelectedCase(nextCase);
+    setStarted(true);
+  }, [case1Stream, case1Signal, case2.phase, case3, dispatch?.caseId]);
+
   const startDispatch = useCallback(record => {
     if (lastDispatchId.current === record.id) return;
     if (editor) throw new Error('Leave the scenario editor before starting coordination.');
-    const active = case1Stream.isSimulationRunning || (case3.isSimulationRunning && !case3.trafficCycleActive);
+    const active = case1Stream.isSimulationRunning ||
+      (case2.phase !== 'ready' && case2.phase !== 'complete') ||
+      (case3.isSimulationRunning && !case3.trafficCycleActive);
     if (active) throw new Error('A dispatch is already active in this scenario.');
+    if (record.caseId === 1) {
+      case3.resetCase3();
+      setCase2(createCase2Simulation());
+      setCase2Frozen(false);
+    } else {
+      case1Stream.resetCase1();
+      case1Signal.resetSignals();
+      setCase2(createCase2Simulation());
+      setCase2Frozen(false);
+    }
     lastDispatchId.current = record.id;
     setDispatch(record);
     setSelectedCase(record.caseId);
     setStarted(true);
     if (record.caseId === 1) case1Stream.dispatchCase1();
     else case3.dispatchCase3();
-  }, [case1Stream, case3, editor]);
+  }, [case1Stream, case1Signal, case2.phase, case3, editor]);
 
-  const handleRemoteCommand = useCallback((command, payload) => {
-    if ((command === 'SWITCH_CASE' || command === 'SET_CASE') && (payload.caseId || payload.caseNumber)) {
+  const handleRemoteCommand = useCallback((command, payload = {}) => {
+    if (command === 'SET_DEMO_MODE') {
+      updateDemoMode(Boolean(payload.enabled));
+    } else if ((command === 'SWITCH_CASE' || command === 'SET_CASE') && (payload.caseId || payload.caseNumber)) {
       const number = Number(payload.caseId || payload.caseNumber);
       if (![1, 2, 3, 4].includes(number)) return;
-      setEditor(null);
-      setSelectedCase(number);
-      setStarted(true);
-    } else if (editor || selectedCase === 4) {
+      switchCase(number);
+    } else if (editor || (started && selectedCase === 4)) {
       return;
+    } else if (command === 'DISPATCH_CASE2') {
+      if (selectedCase !== 2 || case2.phase === 'ready' || case2.phase === 'complete') {
+        dispatchDemo(2);
+      }
+    } else if (command === 'DISPATCH_DEMO') {
+      dispatchDemo(Number(payload.caseId) || undefined);
+    } else if (command === 'RESET_DEMO') {
+      resetDemo(Number(payload.caseId) || undefined);
     } else if (command === 'DISPATCH' && payload.dispatch) {
       try { startDispatch(payload.dispatch); } catch (error) { console.warn(error.message); }
     } else if (command === 'NORMAL_CYCLE') {
@@ -209,7 +439,7 @@ export default function Dashboard() {
         case3.toggleFreeze();
       }
     }
-  }, [selectedCase, editor, case1Stream, case1Signal, case3, startDispatch, toggleCase2Freeze]);
+  }, [started, selectedCase, editor, case1Stream, case1Signal, case2.phase, case3, startDispatch, switchCase, toggleCase2Freeze, updateDemoMode, dispatchDemo, resetDemo]);
 
   // ESP32 Web Serial Hardware Synchronization (Zero-Fail Fallback)
   const {
@@ -262,9 +492,12 @@ export default function Dashboard() {
 
   // Live 20Hz V2X Telemetry Broadcaster to /ambulance and /driver dashboards
   useV2XBroadcaster({
-    selectedCase: editor ? 4 : selectedCase,
+    selectedCase: editor ? 4 : (!started && selectedCase === 4) ? 1 : selectedCase,
     case1Stream,
     case1Signal,
+    case2,
+    case2Frozen,
+    readCase2Signals: case2TrafficSignal,
     case3,
     vehiclesRef,
     espIp,
@@ -274,6 +507,7 @@ export default function Dashboard() {
     isSerialConnected,
     onRemoteCommand: handleRemoteCommand,
     dispatch: dispatch?.caseId === selectedCase ? dispatch : null,
+    demoMode,
   });
   const [tempIp, setTempIp] = useState(espIp);
 
@@ -281,22 +515,19 @@ export default function Dashboard() {
     setTempIp(espIp);
   }, [espIp]);
 
+  const { registerCallbacks } = case1Stream;
+  const { onAmbulanceOnAvenue, onAmbulanceCleared, onNormalCycle } = case1Signal;
   useEffect(() => {
     if (selectedCase === 1) {
-      case1Stream.registerCallbacks(
-        case1Signal.onAmbulanceOnAvenue,
-        case1Signal.onAmbulanceCleared,
-        case1Signal.onNormalCycle
-      );
+      registerCallbacks(onAmbulanceOnAvenue, onAmbulanceCleared, onNormalCycle);
     }
-  }, [selectedCase, case1Stream.registerCallbacks, case1Signal.onAmbulanceOnAvenue, case1Signal.onAmbulanceCleared, case1Signal.onNormalCycle]);
+  }, [selectedCase, registerCallbacks, onAmbulanceOnAvenue, onAmbulanceCleared, onNormalCycle]);
 
   // Synchronize simulation signal states in real-time to physical ESP32
   useEffect(() => {
-    if (editor || selectedCase === 4) return;
     let targetByte = 'R';
 
-    if (selectedCase === 1) {
+    if (started && !editor && selectedCase === 1) {
       // ── In CASE 01 (West Approach Monitoring): ──────────────────────────
       // - If signalPhase === 'W_GREEN' or signalPhase === 'E_RESUME': send 'P'.
       // - If signalPhase === 'W_RELEASE': send 'G'.
@@ -314,7 +545,18 @@ export default function Dashboard() {
       } else {
         targetByte = 'R';
       }
-    } else if (selectedCase === 3) {
+    } else if (started && !editor && selectedCase === 2) {
+      const c2Sig = case2TrafficSignal(case2);
+      if (case2.phase === 'eastGreen' || case2.phase === 'northGreen') {
+        targetByte = 'P';
+      } else if (c2Sig.eYellow) {
+        targetByte = 'Y';
+      } else if (c2Sig.eGreen) {
+        targetByte = 'G';
+      } else {
+        targetByte = 'R';
+      }
+    } else if (started && !editor && selectedCase === 3) {
       // ── In CASE 03 (Ambulance A South Corridor & Post-Clearance Cycle): ──
       // - Before dispatch (IDLE_STANDBY / ALL_RED): send 'R'.
       // - Upon [ENTER] dispatch while Ambulance A's corridor is flushing: send 'P'.
@@ -341,12 +583,19 @@ export default function Dashboard() {
     sendByteCommand(targetByte);
     sendWifiCommand(targetByte);
   }, [
+    started,
     selectedCase,
     editor,
+    isSerialConnected,
+    isWifiEnabled,
     case1Signal.phase,
     case1Signal.signalPhase,
     case1Signal.wGreen,
     case1Signal.wYellow,
+    case2,
+    case2.phase,
+    case2.traffic?.index,
+    case2.traffic?.stage,
     case3.isSimulationRunning,
     case3.trafficCycleActive,
     case3.signals.phase,
@@ -385,7 +634,33 @@ export default function Dashboard() {
             {pending ? <small>Planned</small> : <ArrowUpRight size={19}/>}
           </button>)}</section>
           <section className="field-views"><div className="section-heading"><h2>Field views</h2></div>
-            <CoordinationQueue className="primary-action overview-queue" start={startDispatch} currentDispatchId={dispatch?.id} busy={case1Stream.isSimulationRunning || (case3.isSimulationRunning && !case3.trafficCycleActive)}/>
+            <div className="overview-queue">
+              <button
+                type="button"
+                className="demo-toggle"
+                style={{ width: '100%' }}
+                aria-pressed={demoMode}
+                onClick={() => updateDemoMode(v => !v)}
+              >
+                Demo mode: {demoMode ? 'On · no hospital intake needed' : 'Off · uses hospital departures'}
+              </button>
+              {demoMode ? (
+                <div className="demo-grid">
+                  {[1, 2, 3].map(caseNum => (
+                    <button
+                      key={caseNum}
+                      type="button"
+                      className="primary-action"
+                      onClick={() => dispatchDemo(caseNum)}
+                    >
+                      Run Case 0{caseNum}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <CoordinationQueue className="primary-action overview-queue" start={startDispatch} currentDispatchId={dispatch?.id} busy={case1Stream.isSimulationRunning || (case3.isSimulationRunning && !case3.trafficCycleActive)}/>
+              )}
+            </div>
             <a href="/driver"><span><small>For commuters</small><strong>Live traffic map</strong></span><ArrowUpRight size={19}/></a>
             <a href="/ambulance"><span><small>For response units</small><strong>Ambulance desk</strong></span><ArrowUpRight size={19}/></a>
           </section></div>
@@ -401,7 +676,7 @@ export default function Dashboard() {
         resumeOnEdit={editor?.resume ?? false}
         importAdjustments={editor?.adjusted ?? 0}
         onSave={vehicles => { scenarioLayouts.current[selectedCase] = vehicles; }}
-        onMenu={() => { setEditor(null); setStarted(false); }}
+        onMenu={backToOverview}
         onOriginal={selectedCase !== 4 ? () => setEditor(null) : undefined}
       />
     );
@@ -829,25 +1104,25 @@ export default function Dashboard() {
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
                 <button
-                  onClick={() => { sendByteCommand('P'); testPing('P'); }}
+                  onClick={() => { sendByteCommand('P'); testPing('P', tempIp); }}
                   style={{ background: '#059669', color: '#fff', border: 'none', borderRadius: 6, padding: '6px', fontSize: 10, fontWeight: 800, cursor: 'pointer' }}
                 >
                   {"🟢 TEST 'P' (PREEMPTION)"}
                 </button>
                 <button
-                  onClick={() => { sendByteCommand('G'); testPing('G'); }}
+                  onClick={() => { sendByteCommand('G'); testPing('G', tempIp); }}
                   style={{ background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, padding: '6px', fontSize: 10, fontWeight: 800, cursor: 'pointer' }}
                 >
                   {"🟢 TEST 'G' (GREEN)"}
                 </button>
                 <button
-                  onClick={() => { sendByteCommand('Y'); testPing('Y'); }}
+                  onClick={() => { sendByteCommand('Y'); testPing('Y', tempIp); }}
                   style={{ background: '#ca8a04', color: '#000', border: 'none', borderRadius: 6, padding: '6px', fontSize: 10, fontWeight: 800, cursor: 'pointer' }}
                 >
                   {"🟡 TEST 'Y' (YELLOW)"}
                 </button>
                 <button
-                  onClick={() => { sendByteCommand('R'); testPing('R'); }}
+                  onClick={() => { sendByteCommand('R'); testPing('R', tempIp); }}
                   style={{ background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6, padding: '6px', fontSize: 10, fontWeight: 800, cursor: 'pointer' }}
                 >
                   {"🔴 TEST 'R' (RED)"}
@@ -870,8 +1145,12 @@ export default function Dashboard() {
           stream={case1Stream}
           dispatch={dispatch}
           start={startDispatch}
-          onBackToMenu={() => setStarted(false)}
-          onSwitchCase={(caseId) => setSelectedCase(caseId)}
+          demoMode={demoMode}
+          onToggleDemo={updateDemoMode}
+          onRunDemo={() => dispatchDemo(1)}
+          onResetDemo={() => resetDemo(1)}
+          onBackToMenu={backToOverview}
+          onSwitchCase={switchCase}
         />
       ) : selectedCase === 2 ? (
         <Case2HUD
@@ -879,15 +1158,21 @@ export default function Dashboard() {
           frozen={case2Frozen}
           dispatch={dispatchCase2}
           toggleFreeze={toggleCase2Freeze}
-          onBackToMenu={() => setStarted(false)}
+          onReset={resetCase2}
+          onBackToMenu={backToOverview}
+          onSwitchCase={switchCase}
         />
       ) : (
         <Case3TelemetryHUD
           case3={case3}
           start={startDispatch}
           dispatch={dispatch?.caseId === 3 ? dispatch : null}
-          onBackToMenu={() => setStarted(false)}
-          onSwitchCase={(caseId) => setSelectedCase(caseId)}
+          demoMode={demoMode}
+          onToggleDemo={updateDemoMode}
+          onRunDemo={() => dispatchDemo(3)}
+          onResetDemo={() => resetDemo(3)}
+          onBackToMenu={backToOverview}
+          onSwitchCase={switchCase}
         />
       )}
       {/* ── MOBILE PHONE QR CODE MODAL ── */}
@@ -977,7 +1262,18 @@ export default function Dashboard() {
             <div style={{ display: 'flex', gap: 8, width: '100%' }}>
               <button
                 onClick={() => {
-                  navigator.clipboard.writeText(networkInfo.driverUrl);
+                  if (navigator.clipboard?.writeText) {
+                    navigator.clipboard.writeText(networkInfo.driverUrl).catch(() => {});
+                  } else {
+                    const input = document.createElement('textarea');
+                    input.value = networkInfo.driverUrl;
+                    input.style.position = 'fixed';
+                    input.style.opacity = '0';
+                    document.body.appendChild(input);
+                    input.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(input);
+                  }
                   setCopiedLink(true);
                   setTimeout(() => setCopiedLink(false), 2000);
                 }}

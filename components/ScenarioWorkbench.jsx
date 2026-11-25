@@ -30,7 +30,14 @@ function CoordinateInput({ label, value, onCommit }) {
     <label className="text-xs">{label}
       <input key={value} className={`mt-1 w-full ${control}`} type="number" step=".1"
         defaultValue={value.toFixed(2)}
-        onBlur={event => onCommit(event.currentTarget.valueAsNumber)}
+        onBlur={event => {
+          const next = event.currentTarget.valueAsNumber;
+          if (!Number.isFinite(next)) {
+            event.currentTarget.value = value.toFixed(2);
+            return;
+          }
+          onCommit(next);
+        }}
         onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }} />
     </label>
   );

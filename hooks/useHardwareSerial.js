@@ -29,28 +29,13 @@ export function useHardwareSerial() {
   const writerRef = useRef(null);
   const lastSentRef = useRef(null);
   const isWritingRef = useRef(false);
+  const pendingCharRef = useRef(null);
 
   // Check Web Serial API support in the current browser
   useEffect(() => {
     if (typeof navigator !== 'undefined' && 'serial' in navigator) {
       setIsSupported(true);
     }
-  }, []);
-
-  // Gracefully handle device unplugging
-  useEffect(() => {
-    if (typeof navigator === 'undefined' || !('serial' in navigator)) return;
-
-    const handleDisconnect = (e) => {
-      if (portRef.current && e.target === portRef.current) {
-        disconnectESP32();
-      }
-    };
-
-    navigator.serial.addEventListener('disconnect', handleDisconnect);
-    return () => {
-      navigator.serial.removeEventListener('disconnect', handleDisconnect);
-    };
   }, []);
 
   /**
@@ -77,10 +62,27 @@ export function useHardwareSerial() {
     } finally {
       setIsConnected(false);
       lastSentRef.current = null;
+      pendingCharRef.current = null;
       setLastByteSent(null);
       setErrorMsg(null);
     }
   }, []);
+
+  // Gracefully handle device unplugging
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('serial' in navigator)) return;
+
+    const handleDisconnect = (e) => {
+      if (portRef.current && e.target === portRef.current) {
+        disconnectESP32();
+      }
+    };
+
+    navigator.serial.addEventListener('disconnect', handleDisconnect);
+    return () => {
+      navigator.serial.removeEventListener('disconnect', handleDisconnect);
+    };
+  }, [disconnectESP32]);
 
   /**
    * Connect to ESP32 via Web Serial API prompt
@@ -137,30 +139,41 @@ export function useHardwareSerial() {
     if (!char) return;
     const validBytes = ['R', 'Y', 'G', 'P'];
     if (!validBytes.includes(char)) return;
+    if (!writerRef.current || !portRef.current) return;
 
-    // Deduplicate: ignore if unchanged
+    // Deduplicate while connected: ignore if unchanged
     if (char === lastSentRef.current) return;
 
     lastSentRef.current = char;
     setLastByteSent(char);
 
-    // If port is not connected, update state indicator only
-    if (!writerRef.current || !portRef.current) {
+    if (isWritingRef.current) {
+      pendingCharRef.current = char;
       return;
     }
-
-    if (isWritingRef.current) return;
     isWritingRef.current = true;
 
+    let writeFailed = false;
     try {
-      const data = new TextEncoder().encode(char);
-      await writerRef.current.write(data);
+      let nextChar = char;
+      while (nextChar && writerRef.current) {
+        pendingCharRef.current = null;
+        const data = new TextEncoder().encode(nextChar);
+        await writerRef.current.write(data);
+        nextChar = pendingCharRef.current;
+      }
     } catch (err) {
       console.error(`Failed to write command '${char}' to ESP32:`, err);
+      writeFailed = err?.message || 'USB serial write failed';
     } finally {
       isWritingRef.current = false;
     }
-  }, []);
+
+    if (writeFailed) {
+      await disconnectESP32();
+      setErrorMsg(writeFailed);
+    }
+  }, [disconnectESP32]);
 
   // Cleanup on hook unmount
   useEffect(() => {

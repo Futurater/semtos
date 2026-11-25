@@ -23,8 +23,9 @@ export function useTrafficSignal() {
   const [seqIdx, setSeqIdx]             = useState(0);   // index into SEQ_ARMS for normal cycle
   const [timeRemaining, setTimeRemaining] = useState(RELEASE_DURATION);
 
-  const phaseRef  = useRef('ALL_RED');
+  const phaseRef = useRef('ALL_RED');
   const seqIdxRef = useRef(0);
+  const remainingRef = useRef(RELEASE_DURATION);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
   useEffect(() => { seqIdxRef.current = seqIdx; }, [seqIdx]);
 
@@ -44,6 +45,7 @@ export function useTrafficSignal() {
     if (phaseRef.current === 'W_GREEN') {
       setPhase('E_RESUME');
       phaseRef.current = 'E_RESUME';
+      remainingRef.current = RESUME_DURATION;
       setTimeRemaining(RESUME_DURATION);
     }
   }, []);
@@ -56,8 +58,18 @@ export function useTrafficSignal() {
       phaseRef.current = 'NORMAL_CYCLE';
       setSeqIdx(0);
       seqIdxRef.current = 0;
+      remainingRef.current = RELEASE_DURATION;
       setTimeRemaining(RELEASE_DURATION);
     }
+  }, []);
+
+  const resetSignals = useCallback(() => {
+    phaseRef.current = 'ALL_RED';
+    seqIdxRef.current = 0;
+    remainingRef.current = RELEASE_DURATION;
+    setPhase('ALL_RED');
+    setSeqIdx(0);
+    setTimeRemaining(RELEASE_DURATION);
   }, []);
 
   // ── Sequential release timer (E_RESUME → N → S → W → E → NORMAL) ────────
@@ -71,22 +83,28 @@ export function useTrafficSignal() {
       phase !== 'E_RELEASE'
     ) return;
 
+    remainingRef.current = phase === 'E_RESUME' ? RESUME_DURATION : RELEASE_DURATION;
+    setTimeRemaining(remainingRef.current);
+
     const id = setInterval(() => {
-      setTimeRemaining(prev => {
-        const next = prev - 100;
-        if (next <= 0) {
-          setPhase(cur => {
-            if (cur === 'E_RESUME')  return 'N_RELEASE';
-            if (cur === 'N_RELEASE') return 'S_RELEASE';
-            if (cur === 'S_RELEASE') return 'W_RELEASE';
-            if (cur === 'W_RELEASE') return 'E_RELEASE';
-            return 'NORMAL_CYCLE'; // E_RELEASE → NORMAL_CYCLE
-          });
-          setTimeRemaining(RELEASE_DURATION);
-          return RELEASE_DURATION;
-        }
-        return next;
-      });
+      const next = remainingRef.current - 100;
+      if (next <= 0) {
+        remainingRef.current = RELEASE_DURATION;
+        setTimeRemaining(RELEASE_DURATION);
+        setPhase(cur => {
+          const nextPhase =
+            cur === 'E_RESUME'  ? 'N_RELEASE' :
+            cur === 'N_RELEASE' ? 'S_RELEASE' :
+            cur === 'S_RELEASE' ? 'W_RELEASE' :
+            cur === 'W_RELEASE' ? 'E_RELEASE' :
+            'NORMAL_CYCLE';
+          phaseRef.current = nextPhase;
+          return nextPhase;
+        });
+      } else {
+        remainingRef.current = next;
+        setTimeRemaining(next);
+      }
     }, 100);
     return () => clearInterval(id);
   }, [phase]);
@@ -95,21 +113,21 @@ export function useTrafficSignal() {
   // Sequence: N → S → W → E → N → S → ...
   useEffect(() => {
     if (phase !== 'NORMAL_CYCLE') return;
+    remainingRef.current = RELEASE_DURATION;
     setTimeRemaining(RELEASE_DURATION);
 
     const id = setInterval(() => {
-      setTimeRemaining(prev => {
-        const next = prev - 100;
-        if (next <= 0) {
-          // Advance to next arm
-          const nextIdx = (seqIdxRef.current + 1) % SEQ_ARMS.length;
-          setSeqIdx(nextIdx);
-          seqIdxRef.current = nextIdx;
-          setTimeRemaining(RELEASE_DURATION);
-          return RELEASE_DURATION;
-        }
-        return next;
-      });
+      const next = remainingRef.current - 100;
+      if (next <= 0) {
+        const nextIdx = (seqIdxRef.current + 1) % SEQ_ARMS.length;
+        seqIdxRef.current = nextIdx;
+        remainingRef.current = RELEASE_DURATION;
+        setSeqIdx(nextIdx);
+        setTimeRemaining(RELEASE_DURATION);
+      } else {
+        remainingRef.current = next;
+        setTimeRemaining(next);
+      }
     }, 100);
     return () => clearInterval(id);
   }, [phase]);
@@ -177,6 +195,7 @@ export function useTrafficSignal() {
     onAmbulanceOnAvenue,
     onAmbulanceCleared,
     onNormalCycle,
+    resetSignals,
     signalPhase: armLabel,
     timeRemaining: Math.ceil(timeRemaining / 1000),
   };

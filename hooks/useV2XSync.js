@@ -6,7 +6,24 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 const CHANNEL_NAME = 'SEMTOS_V2X_LIVE_BUS_V1';
 const STORAGE_KEY = 'SEMTOS_V2X_LATEST_SNAPSHOT_V1';
 const CMD_STORAGE_KEY = 'SEMTOS_V2X_LATEST_CMD_V1';
-const LIVE_TIMEOUT_MS = 1500;
+const DEMO_STORAGE_KEY = 'SEMTOS_DEMO_MODE_V1';
+const LIVE_TIMEOUT_MS = 4500;
+
+function readStoredDemoMode() {
+  try {
+    return typeof window !== 'undefined' && window.localStorage.getItem(DEMO_STORAGE_KEY) === '1';
+  } catch (_) {
+    return false;
+  }
+}
+
+function writeStoredDemoMode(enabled) {
+  try {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(DEMO_STORAGE_KEY, enabled ? '1' : '0');
+    }
+  } catch (_) {}
+}
 
 export { ROAD_NODES, ORIGIN_LNG, ORIGIN_LAT, signalArms, offsetLngLatPerp, buildRoadTrafficLinesGeoJSON } from './corridorGeometry';
 import { twinToRoadGeo, vehicleToRoadGeo } from './corridorGeometry';
@@ -26,10 +43,39 @@ export function haversineMeters([lon1, lat1], [lon2, lat2]) {
 /**
  * Publisher Hook — Used inside `src/app/page.js` to broadcast 20Hz live telemetry + vehicles
  */
+const CASE2_PHASE_LABELS = {
+  ready: 'Ready to run',
+  approach: 'Ambulances approaching',
+  eastGreen: 'Eastbound priority',
+  eastClearance: 'Clearing the eastbound approach',
+  northGreen: 'Northbound priority',
+  clear: 'Junction cleared',
+  complete: 'Both ambulances cleared',
+};
+
+function case2MapSnapshot(simulation, frozen) {
+  const { phase, northStatus, east, north } = simulation;
+  const active = phase !== 'ready' && phase !== 'complete';
+  const unit = (position, direction, instruction) => ({
+    position: { x: position.x, z: position.z },
+    ...vehicleToRoadGeo(position.x, position.z, direction, 2),
+    instruction,
+  });
+  return {
+    phase, phaseLabel: CASE2_PHASE_LABELS[phase],
+    isSimulationRunning: active, isFrozen: Boolean(frozen),
+    east: unit(east, 'E', CASE2_PHASE_LABELS[phase === 'northGreen' ? 'clear' : phase]),
+    north: unit(north, 'N', phase === 'complete' ? 'Junction cleared' : northStatus),
+  };
+}
+
 export function useV2XBroadcaster({
   selectedCase,
   case1Stream,
   case1Signal,
+  case2,
+  case2Frozen,
+  readCase2Signals,
   case3,
   vehiclesRef,
   espIp,
@@ -39,14 +85,15 @@ export function useV2XBroadcaster({
   isSerialConnected,
   onRemoteCommand,
   dispatch,
+  demoMode,
 }) {
   const channelRef = useRef(null);
   const latest = useRef({});
 
   useEffect(() => {
     latest.current = {
-      selectedCase, case1Stream, case1Signal, case3, vehiclesRef, espIp,
-      isWifiEnabled, lastWifiByteSent, serialLastByte, isSerialConnected, onRemoteCommand, dispatch,
+      selectedCase, case1Stream, case1Signal, case2, case2Frozen, readCase2Signals, case3, vehiclesRef, espIp,
+      isWifiEnabled, lastWifiByteSent, serialLastByte, isSerialConnected, onRemoteCommand, dispatch, demoMode,
     };
   });
 
@@ -123,10 +170,11 @@ export function useV2XBroadcaster({
     let snapshotPending = false;
     const interval = setInterval(() => {
       const {
-        selectedCase, case1Stream, case1Signal, case3, vehiclesRef, espIp,
+        selectedCase, case1Stream, case1Signal, case2, case2Frozen, readCase2Signals, case3, vehiclesRef, espIp,
         isWifiEnabled, lastWifiByteSent, serialLastByte, isSerialConnected,
       } = latest.current;
-      if (selectedCase !== 1 && selectedCase !== 3) return;
+      if (![1, 2, 3].includes(selectedCase) || (selectedCase === 2 && !case2)) return;
+      const handoff = selectedCase === 2 ? case2MapSnapshot(case2, case2Frozen) : null;
       const c1Pos = case1Stream?.ambulancePosition || { x: -120, y: 0.5, z: -6.0, rotation: -Math.PI / 2 };
       const c1Geo = twinToRoadGeo(c1Pos.x, c1Pos.z, { ambId: 'AMB_1' });
 
@@ -138,7 +186,7 @@ export function useV2XBroadcaster({
       const c3GeoB = twinToRoadGeo(c3PosB.x, c3PosB.z, { ambId: 'AMB_B', wpIdx: wpIdxB });
 
       // Serialize live civilian vehicles from TrafficManager.jsx
-      const rawVehicles = vehiclesRef?.current || [];
+      const rawVehicles = handoff ? case2.cars : vehiclesRef?.current || [];
       const vehicles = rawVehicles.map((veh) => {
         const vx = veh.pos?.x ?? 0;
         const vz = veh.pos?.z ?? 0;
@@ -149,7 +197,7 @@ export function useV2XBroadcaster({
           x: Number(vx.toFixed(2)),
           z: Number(vz.toFixed(2)),
           speed: Number((veh.speed || 0).toFixed(2)),
-          state: veh.state || 'IDLE_QUEUE',
+          state: handoff ? (veh.speed > 0.25 ? 'MOVING' : 'IDLE_QUEUE') : veh.state || 'IDLE_QUEUE',
           ble: Boolean(veh.receivesBLE),
           lngLat: geo.lngLat,
           bearing: Number(geo.bearing.toFixed(1)),
@@ -172,6 +220,10 @@ export function useV2XBroadcaster({
           wYellow: Boolean(case1Signal?.wYellow),
           timeRemaining: case1Signal?.timeRemaining ?? 15,
           isPreempted: Boolean(case1Signal?.isPreempted),
+        } : handoff ? {
+          ...readCase2Signals(case2),
+          signalPhase: handoff.phaseLabel,
+          isPreempted: handoff.phase === 'eastGreen' || handoff.phase === 'northGreen',
         } : {
           phase: case3?.signals?.phase || 'ALL_RED',
           signalPhase: case3?.signals?.phaseLabel || 'STANDBY',
@@ -187,7 +239,9 @@ export function useV2XBroadcaster({
           isPreempted: Boolean(case3?.deadlockDetected && !case3?.trafficCycleActive),
         },
         vehicles,
+        case2: handoff,
         dispatch: latest.current.dispatch ?? null,
+        demoMode: Boolean(latest.current.demoMode),
         case1: {
           isSimulationRunning: Boolean(case1Stream?.isSimulationRunning),
           isFrozen: Boolean(case1Stream?.isFrozen),
@@ -474,6 +528,387 @@ function stepStandaloneVehicles(cars, { caseId, dt, ambPos, isPreempted, nGreen,
   });
 }
 
+// ── Pure JS Standalone Case 2 Simulation (mirrors components/case2Simulation.js without Three.js) ──
+const C2_EAST_CAR_STOP = -10;
+const C2_EAST_CLEAR = 5.85;
+const C2_EAST_TRAFFIC_EXIT = 72;
+const C2_EAST_YIELD_RADIUS = 12;
+const C2_NORTH_STOP = 16.7;
+const C2_NORTH_CLEAR = -11.85;
+const C2_NORTH_START = 66.2;
+const C2_NORTH_DISPATCH_EAST_X = -112;
+const C2_NORTH_LANE = 0.81;
+const C2_NORTH_PASS_LANE = 2.56;
+const C2_NORTH_JUNCTION_LANE = 2.35;
+const C2_NORTH_QUEUE_RETURN = 40;
+const C2_EAST_DEST = 88;
+const C2_NORTH_DEST = -67;
+const C2_AMB_CRUISE = 10;
+const C2_CAR_CRUISE = 6;
+const C2_NORTH_CRAWL = 5;
+const C2_AMBULANCE = { length: 2.16, width: 0.79 };
+const C2_CAR = { length: 1.64, width: 0.70 };
+const C2_EDGES = { top: -9.58, bottom: -1.24, westTop: 9.58, westBottom: 1.24, left: -3.69, right: 3.44 };
+const C2_NORMAL_ARMS = ['E', 'N', 'S', 'W'];
+const C2_NORMAL_ROUTES = {
+  E: { stop: C2_EAST_CAR_STOP, clear: 7, exit: 72, entry: -79 },
+  N: { stop: C2_NORTH_STOP, clear: -13, exit: -58, entry: 61 },
+  S: { stop: -14, clear: 15, exit: 61, entry: -58 },
+  W: { stop: 11, clear: -8, exit: -79, entry: 72 },
+};
+
+const c2Clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+const c2Lerp = (a, b, t) => a + (b - a) * t;
+const c2Smoothstep = (x, min, max) => {
+  if (x <= min) return 0;
+  if (x >= max) return 1;
+  const t = (x - min) / (max - min);
+  return t * t * (3 - 2 * t);
+};
+
+function c2Footprint(heading, steering, size = C2_CAR) {
+  const sideways = Math.abs(Math.cos(steering)) * size.width + Math.abs(Math.sin(steering)) * size.length;
+  const forward = Math.abs(Math.cos(steering)) * size.length + Math.abs(Math.sin(steering)) * size.width;
+  return heading === 'E' || heading === 'W' ? { x: forward, z: sideways } : { x: sideways, z: forward };
+}
+
+function c2RoadLimits(type) {
+  if (type === 'E') return [C2_EDGES.top, C2_EDGES.bottom];
+  if (type === 'W') return [C2_EDGES.westBottom, C2_EDGES.westTop];
+  return type === 'N' ? [0, C2_EDGES.right] : [C2_EDGES.left, 0];
+}
+
+function c2Overlaps(a, aExt, b, bExt, gap = 0) {
+  return Math.abs(a.x - b.x) < aExt.x + bExt.x + gap && Math.abs(a.z - b.z) < aExt.z + bExt.z + gap;
+}
+
+function createStandaloneCase2() {
+  const lanes = [
+    { dir: 'N', axis: 'z', perpAxis: 'x', sign: -1, perpHome: 2.5, stopLine: 11 },
+    { dir: 'N', axis: 'z', perpAxis: 'x', sign: -1, perpHome: 1.0, stopLine: 11 },
+    { dir: 'S', axis: 'z', perpAxis: 'x', sign: 1, perpHome: -3.1, stopLine: -11 },
+    { dir: 'S', axis: 'z', perpAxis: 'x', sign: 1, perpHome: -1.8, stopLine: -11 },
+    { dir: 'E', axis: 'x', perpAxis: 'z', sign: 1, perpHome: -7.5, stopLine: -7 },
+    { dir: 'E', axis: 'x', perpAxis: 'z', sign: 1, perpHome: -4.5, stopLine: -7 },
+    { dir: 'W', axis: 'x', perpAxis: 'z', sign: -1, perpHome: 4.5, stopLine: 6 },
+    { dir: 'W', axis: 'x', perpAxis: 'z', sign: -1, perpHome: 7.5, stopLine: 6 },
+  ];
+
+  const cars = [];
+  let nextId = 1;
+  lanes.forEach((lane, laneIndex) => {
+    const count = lane.dir === 'E' ? 9 : lane.axis === 'z' ? 3 : 4;
+    const stagger = (laneIndex % 2) * 5;
+    const spacing = lane.dir === 'E' ? 7 : 8;
+    for (let index = 0; index < count; index++) {
+      const longitudinal = lane.stopLine - lane.sign * (2 + stagger + index * spacing);
+      const id = nextId++;
+      const pos = {
+        x: lane.axis === 'x' ? longitudinal : lane.perpHome,
+        y: 0.2,
+        z: lane.axis === 'z' ? longitudinal : lane.perpHome,
+      };
+      const car = {
+        id,
+        type: lane.dir,
+        axis: lane.axis,
+        perpAxis: lane.perpAxis,
+        sign: lane.sign,
+        homePerp: lane.perpHome,
+        queueIndex: index,
+        pos,
+        rotY: 0,
+        speed: 0,
+        receivesBLE: false,
+      };
+
+      if (car.type === 'E') {
+        const outside = car.homePerp < -6;
+        const gaps = outside ? [0, 1.4, -0.8, -2.1, 0.7, 2.4, 1, -0.7, 1.6] : [0.1, -1.3, 0.8, 2, -0.4, -1.7, 0.9, 2.1, 0.3];
+        car.pos.z = (outside ? -7.9 : -4.1) + Math.sin(car.id * 2.4) * 0.13;
+        car.pos.x -= (outside ? 3.5 : 3) + gaps[index];
+        if (index === 2 || (outside && index === 5)) car.pos.z += outside ? 0.45 : -0.45;
+        car.yieldPlan = { side: outside ? -8.45 : -3.45, advance: 0.65, delay: 0.24 + (index % 3) * 0.08, duration: 1.15 };
+      } else if (car.type === 'N') {
+        const curbLane = car.homePerp > 2;
+        car.pos.x = curbLane ? 2.65 : 0.90;
+        car.pos.z = (curbLane ? [23.5, 29.8, 50] : [22.2, 49.8, 57.2])[index];
+        if (curbLane && index === 2) {
+          car.yieldPlan = { side: 2.65, advance: 15, range: 15.5, delay: 0.42, duration: 4.0 };
+        } else if (!curbLane && index === 2) {
+          car.yieldPlan = { side: 0.71, advance: 0.55, range: 6.1, delay: 0.28, duration: 1.2 };
+        } else if (!curbLane && index === 0) {
+          car.yieldPlan = { side: 2.65, advance: 4.7, range: 10, delay: 0.36, duration: 1.8, sideDelay: 0.46 };
+        }
+      } else {
+        car.pos[car.axis] -= car.sign * 5;
+        if (car.type === 'S' && car.homePerp > -2) car.pos.x = -1.35;
+      }
+
+      const [min, max] = c2RoadLimits(car.type);
+      car.pos[car.perpAxis] = c2Clamp(car.pos[car.perpAxis], min + C2_CAR.width, max - C2_CAR.width);
+      car.returnPerp = car.pos[car.perpAxis];
+      cars.push(car);
+    }
+  });
+
+  return {
+    phase: 'ready',
+    northStatus: 'Ready to run',
+    east: { x: -120, y: 0.6, z: -6, rotation: -Math.PI / 2, speed: 0 },
+    north: { x: C2_NORTH_LANE, y: 0.67, z: C2_NORTH_START, rotation: 0, speed: 0 },
+    cars,
+  };
+}
+
+function c2Drive(veh, pos, axis, sign, limit, cruise, dt) {
+  const room = Math.max(0, (limit - pos[axis]) * sign);
+  const targetSpeed = Math.min(cruise, Math.sqrt(2 * 7 * room));
+  veh.speed += c2Clamp(targetSpeed - veh.speed, -8 * dt, 5.5 * dt);
+  const step = Math.min(veh.speed * dt, room);
+  pos[axis] += sign * step;
+  if (step === room) veh.speed = 0;
+}
+
+function c2FollowLimit(pos, ext, axis, sign, limit, leader, leaderExt, gap) {
+  const perp = axis === 'x' ? 'z' : 'x';
+  if ((leader[axis] - pos[axis]) * sign <= 0) return limit;
+  if (Math.abs(leader[perp] - pos[perp]) >= ext[perp] + leaderExt[perp] + 0.10) return limit;
+  const safeLimit = leader[axis] - sign * (ext[axis] + leaderExt[axis] + gap);
+  return sign === 1 ? Math.min(limit, safeLimit) : Math.max(limit, safeLimit);
+}
+
+function c2AmbLimit(cars, amb, type, axis, sign, limit) {
+  const ext = c2Footprint(type, type === 'N' ? amb.rotation : 0, C2_AMBULANCE);
+  for (const car of cars) {
+    if (car.type === type) limit = c2FollowLimit(amb, ext, axis, sign, limit, car.pos, c2Footprint(type, car.rotY), 0.45);
+  }
+  return limit;
+}
+
+function c2NorthYaw(x, yaw, size) {
+  const room = Math.min(x, C2_EDGES.right - x);
+  const safeYaw = Math.asin(c2Clamp((room - size.width) / size.length, 0, 1));
+  return c2Clamp(yaw, -safeYaw, safeYaw);
+}
+
+function c2AdvanceNorth(sim, northHeld, dt) {
+  const { north, cars } = sim;
+  const limit = c2AmbLimit(cars, north, 'N', 'z', -1, northHeld ? C2_NORTH_STOP : C2_NORTH_DEST);
+  const next = { x: north.x, z: north.z, speed: north.speed };
+  c2Drive(next, next, 'z', -1, limit, northHeld ? C2_NORTH_CRAWL : C2_AMB_CRUISE, dt);
+  if (next.z === north.z) {
+    north.speed = next.speed;
+    return;
+  }
+  const moveRight = c2Smoothstep(C2_NORTH_START - next.z, 0, 4.5);
+  const moveLeft = c2Smoothstep(45.3 - next.z, 0, 45.3 - C2_NORTH_QUEUE_RETURN);
+  next.x = next.z >= 14.6
+    ? c2Lerp(C2_NORTH_LANE, C2_NORTH_PASS_LANE, moveRight * (1 - moveLeft))
+    : c2Lerp(C2_NORTH_LANE, C2_NORTH_JUNCTION_LANE, c2Smoothstep(14.6 - next.z, 0, 8.6));
+  const yaw = -Math.atan2(next.x - north.x, north.z - next.z);
+  const rot = c2NorthYaw(next.x, yaw, C2_AMBULANCE);
+  const ext = c2Footprint('N', rot, C2_AMBULANCE);
+  if (cars.some(c => c2Overlaps(next, ext, c.pos, c2Footprint(c.type, c.rotY), 0.12))) {
+    north.speed = 0;
+    return;
+  }
+  north.x = next.x;
+  north.z = next.z;
+  north.speed = next.speed;
+  north.rotation = rot;
+}
+
+function stepStandaloneCase2(sim, dt) {
+  if (dt <= 0 || sim.phase === 'ready') return;
+  const keepsJunction = (car) => {
+    const { stop, clear } = C2_NORMAL_ROUTES[car.type];
+    const coord = car.pos[car.axis];
+    return (coord - stop) * car.sign > 0.001 && (coord - clear) * car.sign < 0;
+  };
+  const mergeNorthCar = (car) => {
+    const next = { x: Math.min(2.65, car.pos.x + 1.15 * dt), z: car.pos.z };
+    const rot = c2NorthYaw(next.x, -0.19, C2_CAR);
+    const ext = c2Footprint('N', rot);
+    if (c2Overlaps(next, ext, sim.north, c2Footprint('N', sim.north.rotation, C2_AMBULANCE), 0.2)) return;
+    if (sim.cars.some(o => o !== car && c2Overlaps(next, ext, o.pos, c2Footprint(o.type, o.rotY), 0.2))) return;
+    car.pos.x = next.x;
+    car.rotY = next.x === 2.65 ? 0 : rot;
+  };
+
+  if (sim.traffic) {
+    if (sim.phase !== 'complete') {
+      c2Drive(sim.east, sim.east, 'x', 1, C2_EAST_DEST, C2_AMB_CRUISE, dt);
+      c2AdvanceNorth(sim, false, dt);
+      if (sim.north.z <= C2_NORTH_DEST && sim.east.x >= C2_EAST_DEST) sim.phase = 'complete';
+    }
+    const { cars, east, north, traffic, phase } = sim;
+    const activeArm = C2_NORMAL_ARMS[traffic.index];
+    const ambulances = phase === 'complete' ? [] : [[east, 'E', 0], [north, 'N', north.rotation]];
+    for (const car of cars) {
+      const { stop, exit, entry } = C2_NORMAL_ROUTES[car.type];
+      const { pos, axis, sign, type, perpAxis } = car;
+      if (type === 'N' && pos.z >= C2_NORTH_STOP - 0.001 && pos.z < 28 && pos.x < 2.65) mergeNorthCar(car);
+      if (type === 'S' && pos.z <= stop + 0.001 && pos.z > -26 && pos.x > -2.55) {
+        const next = { x: Math.max(-2.55, pos.x - dt), z: pos.z };
+        if (!cars.some(o => o !== car && c2Overlaps(next, c2Footprint(type, 0), o.pos, c2Footprint(o.type, o.rotY), 0.2))) pos.x = next.x;
+      }
+      const approachingFixture = (type === 'N' && pos.x < 2.2) || (type === 'S' && pos.x > -2.5);
+      const ext = c2Footprint(type, car.rotY);
+      const allowed = keepsJunction(car) || (traffic.stage === 'green' && activeArm === type && !approachingFixture);
+      const beyondStop = (pos[axis] - stop) * sign > 0.001;
+      let limit = allowed || beyondStop ? exit : stop;
+      for (const o of cars) if (o !== car && o.type === type) limit = c2FollowLimit(pos, ext, axis, sign, limit, o.pos, c2Footprint(type, o.rotY), 1.0);
+      for (const [amb, dir, yaw] of ambulances) if (dir === type) limit = c2FollowLimit(pos, ext, axis, sign, limit, amb, c2Footprint(dir, yaw, C2_AMBULANCE), 0.8);
+      const next = { ...pos, speed: car.speed };
+      c2Drive(next, next, axis, sign, limit, C2_CAR_CRUISE, dt);
+      if (!cars.some(o => o !== car && c2Overlaps(next, ext, o.pos, c2Footprint(o.type, o.rotY), 0.10)) &&
+          !ambulances.some(([a, dir, yaw]) => c2Overlaps(next, ext, a, c2Footprint(dir, yaw, C2_AMBULANCE), 0.10))) {
+        pos[axis] = next[axis];
+        car.speed = next.speed;
+      } else car.speed = 0;
+      if (pos[axis] !== exit || phase !== 'complete') continue;
+      const spawn = { ...pos, [axis]: entry, [perpAxis]: car.returnPerp };
+      if (cars.some(o => o !== car && c2Overlaps(spawn, c2Footprint(type, 0), o.pos, c2Footprint(o.type, o.rotY), 1.2))) continue;
+      pos.x = spawn.x; pos.y = spawn.y; pos.z = spawn.z;
+      car.rotY = 0;
+    }
+    traffic.remaining -= dt;
+    if (traffic.remaining <= 0) {
+      if (traffic.stage === 'green') {
+        traffic.stage = traffic.initial ? 'clearance' : 'yellow';
+        traffic.remaining = traffic.initial ? 0.5 : 2.5;
+      } else if (traffic.stage === 'yellow') {
+        traffic.stage = 'clearance';
+        traffic.remaining = 0.5;
+      } else if (!cars.some(keepsJunction)) {
+        traffic.index = (traffic.index + 1) % C2_NORMAL_ARMS.length;
+        traffic.initial = false;
+        traffic.stage = 'green';
+        traffic.remaining = 12.5;
+      }
+    }
+    return;
+  }
+
+  const { cars, east, north } = sim;
+  const northHeld = sim.phase !== 'northGreen' && sim.phase !== 'clear';
+  for (const car of cars) {
+    if (!car.yieldPlan) continue;
+    const eastbound = car.type === 'E';
+    const amb = eastbound ? east : north;
+    const { axis, perpAxis, sign, pos } = car;
+    const distance = (pos[axis] - amb[axis]) * sign;
+    const reactionDist = eastbound ? C2_EAST_YIELD_RADIUS : car.yieldPlan.range;
+    const canStart = eastbound ? sim.phase === 'eastGreen' && !car.eastCommitted && pos.x < C2_EAST_CAR_STOP - 2 : northHeld;
+    const nearAmb = canStart && Math.hypot(distance, pos[perpAxis] - amb[perpAxis]) <= reactionDist;
+    car.receivesBLE = nearAmb && distance >= -2;
+    if (car.yieldProgress === 1) continue;
+    if (!car.yieldOrigin) {
+      if (!nearAmb || distance < 0) continue;
+      car.reactionTime = (car.reactionTime ?? 0) + dt;
+      if (car.reactionTime < car.yieldPlan.delay) continue;
+      car.yieldOrigin = { ...pos };
+      car.yieldProgress = 0;
+    }
+    const { side, advance, duration, sideDelay = 0 } = car.yieldPlan;
+    const progress = Math.min(1, car.yieldProgress + dt / duration);
+    const eased = c2Smoothstep(progress, 0, 1);
+    const sideways = c2Smoothstep(progress, sideDelay, 1);
+    const goingRight = (side - car.yieldOrigin[perpAxis]) * sign;
+    const desiredSteering = Math.sign(goingRight) * (eastbound ? -0.28 * Math.sin(Math.PI * progress) : 0.24 * Math.sin(Math.PI * sideways));
+    const lateral = c2Lerp(car.yieldOrigin[perpAxis], side, sideways);
+    const steering = car.type === 'N' ? c2NorthYaw(lateral, desiredSteering, C2_CAR) : desiredSteering;
+    const ext = c2Footprint(car.type, steering);
+    const [min, max] = c2RoadLimits(car.type);
+    const next = {
+      [axis]: car.yieldOrigin[axis] + sign * advance * eased,
+      [perpAxis]: c2Clamp(lateral, min + ext[perpAxis], max - ext[perpAxis]),
+    };
+    if (c2Overlaps(next, ext, amb, c2Footprint(car.type, eastbound ? 0 : north.rotation, C2_AMBULANCE), 0.11)) continue;
+    if (cars.some(o => o !== car && c2Overlaps(next, ext, o.pos, c2Footprint(o.type, o.rotY), 0.11))) continue;
+    car.speed = Math.abs(next[axis] - pos[axis]) / dt;
+    pos[axis] = next[axis];
+    pos[perpAxis] = next[perpAxis];
+    car.rotY = steering;
+    car.yieldProgress = progress;
+  }
+
+  const eastLimit = c2AmbLimit(cars, east, 'E', 'x', 1, C2_EAST_DEST);
+  const inNorthQueue = north.z < 63 && northHeld;
+  c2Drive(east, east, 'x', 1, eastLimit, C2_AMB_CRUISE, dt);
+  if (east.x >= C2_NORTH_DISPATCH_EAST_X) c2AdvanceNorth(sim, northHeld, dt);
+
+  for (const car of cars) {
+    const eastRolling = car.type === 'E' && sim.phase !== 'approach';
+    const northReleased = car.type === 'N' && (sim.phase === 'northGreen' || sim.phase === 'clear');
+    const closingNorthGap = car.type === 'N' && !northReleased && car.homePerp < 2 && !car.yieldPlan && car.pos.z > north.z;
+    if ((!eastRolling && !northReleased && !closingNorthGap) || (car.yieldOrigin && car.yieldProgress < 1)) continue;
+    const amb = eastRolling ? east : north;
+    const { pos, axis, sign, type } = car;
+    const needsMerge = northReleased && pos.x < 2.65 && pos.z < 27;
+    if (needsMerge) mergeNorthCar(car);
+    const ext = c2Footprint(type, car.rotY);
+    const heldAtLine = closingNorthGap || (sim.phase === 'clear' && pos.z >= C2_NORTH_STOP);
+    if (eastRolling) {
+      if (sim.phase === 'eastGreen' && !car.eastCommitted) {
+        const timeUntilHandoff = (C2_EAST_CLEAR - east.x) / C2_AMB_CRUISE;
+        const timeToCross = (C2_EAST_CLEAR - pos.x) / C2_CAR_CRUISE + 0.65;
+        if (pos.x >= C2_EAST_CAR_STOP - 2 && timeToCross <= timeUntilHandoff) {
+          car.eastCommitted = true;
+          car.receivesBLE = false;
+        }
+      } else if (sim.phase !== 'eastGreen' && pos.x <= C2_EAST_CAR_STOP) {
+        car.eastCommitted = false;
+      }
+    }
+    let limit = eastRolling ? (car.eastCommitted ? C2_EAST_TRAFFIC_EXIT : C2_EAST_CAR_STOP)
+      : heldAtLine || needsMerge ? C2_NORTH_STOP : C2_NORTH_DEST;
+    if ((northReleased || closingNorthGap) && north.z < pos.z) {
+      const ahead = c2Footprint(type, north.rotation, C2_AMBULANCE);
+      limit = Math.max(limit, north.z + ext.z + ahead.z + 0.9);
+    } else {
+      limit = c2FollowLimit(pos, ext, axis, sign, limit, amb, c2Footprint(type, 0, C2_AMBULANCE), 0.9);
+    }
+    for (const leader of cars) {
+      if (leader.type === type && leader !== car) limit = c2FollowLimit(pos, ext, axis, sign, limit, leader.pos, c2Footprint(type, leader.rotY), 1.0);
+    }
+    c2Drive(car, pos, axis, sign, limit, C2_CAR_CRUISE, dt);
+  }
+
+  if (sim.phase === 'approach' && east.x >= -85) sim.phase = 'eastGreen';
+  if (northHeld) {
+    sim.northStatus = north.z <= C2_NORTH_STOP + 0.01 ? 'Stopped at the red light'
+      : !inNorthQueue ? 'Approaching the junction'
+      : north.speed > 0.06 ? 'Creeping through traffic' : 'Waiting for a gap';
+    if (east.x >= C2_EAST_CLEAR) {
+      const corridorClear = !cars.some(c => c.eastCommitted && c.pos.x > C2_EAST_CAR_STOP && c.pos.x - c2Footprint('E', c.rotY).x <= C2_EDGES.right);
+      sim.phase = corridorClear ? 'northGreen' : 'eastClearance';
+      if (corridorClear) sim.northStatus = 'Green · crossing the junction';
+    }
+  } else if (north.z <= C2_NORTH_CLEAR) {
+    sim.phase = 'clear';
+    sim.northStatus = 'Junction clear · hospital-bound';
+    sim.traffic = { index: 0, stage: 'green', initial: true, remaining: 5 };
+  }
+}
+
+function readStandaloneCase2Signals(simulation) {
+  const { phase, traffic } = simulation;
+  const arm = traffic && C2_NORMAL_ARMS[traffic.index].toLowerCase();
+  return {
+    phase: traffic ? 'NORMAL_CYCLE' : phase,
+    eGreen: phase === 'eastGreen' || (arm === 'e' && traffic.stage === 'green'),
+    nGreen: phase === 'northGreen' || (arm === 'n' && traffic.stage === 'green'),
+    sGreen: arm === 's' && traffic.stage === 'green',
+    wGreen: arm === 'w' && traffic.stage === 'green',
+    eYellow: Boolean(traffic?.stage === 'yellow' && arm === 'e'),
+    nYellow: Boolean(traffic?.stage === 'yellow' && arm === 'n'),
+    sYellow: Boolean(traffic?.stage === 'yellow' && arm === 's'),
+    wYellow: Boolean(traffic?.stage === 'yellow' && arm === 'w'),
+  };
+}
+
 function createInitialStandaloneState() {
   const c1Geo = twinToRoadGeo(-120, -6.0, { ambId: 'AMB_1' });
   const c3GeoA = twinToRoadGeo(2.2, 90.0, { ambId: 'AMB_A' });
@@ -487,6 +922,8 @@ function createInitialStandaloneState() {
     timestamp: Date.now(),
     selectedCase: 1,
     isStandaloneFallback: true,
+    demoMode: false,
+    case2: null,
     vehicles: initialCars,
     signals: {
       phase: 'ALL_RED',
@@ -561,6 +998,7 @@ export function useV2XReceiver() {
   const standaloneRef = useRef(null);
   if (!standaloneRef.current) standaloneRef.current = {
     selectedCase: 1,
+    demoMode: false,
     running: false,
     frozen: false,
     c1X: -120,
@@ -572,7 +1010,227 @@ export function useV2XReceiver() {
     cycleArmIdx: 0,
     cycleTimer: 15.0,
     vehicles: createStandaloneVehicles(1),
+    case2: createStandaloneCase2(),
   };
+
+  const emitStandaloneSnapshot = useCallback((s, stepVehicles = false, dt = 0) => {
+    if (s.selectedCase === 1) {
+      let phase = 'ALL_RED';
+      let eGreen = false, wGreen = false, nGreen = false, sGreen = false;
+      let eYellow = false, wYellow = false, nYellow = false, sYellow = false;
+      let isPreempted = false;
+
+      if (s.running) {
+        if (s.c1X >= -85 && s.c1X < 15) {
+          phase = 'W_GREEN';
+          eGreen = true;
+          wGreen = true;
+          isPreempted = true;
+        } else if (s.c1X >= 15) {
+          phase = 'E_RESUME';
+          eGreen = true;
+        }
+      } else {
+        const avenue = s.cycleArmIdx === 0;
+        const green = s.cycleTimer > 3;
+        const yellow = s.cycleTimer <= 3 && s.cycleTimer > 1;
+        eGreen = wGreen = avenue && green;
+        nGreen = sGreen = !avenue && green;
+        eYellow = wYellow = avenue && yellow;
+        nYellow = sYellow = !avenue && yellow;
+        if (green || yellow) phase = avenue ? 'MG_ROAD' : 'BRIGADE_KAMARAJ';
+      }
+
+      const c1Pos = { x: s.c1X, y: 0.5, z: -6.0, rotation: -Math.PI / 2 };
+      const c1Geo = twinToRoadGeo(c1Pos.x, c1Pos.z, { ambId: 'AMB_1' });
+      const vehicles = stepVehicles
+        ? stepStandaloneVehicles(s.vehicles, {
+            caseId: 1,
+            dt,
+            ambPos: c1Pos,
+            isPreempted,
+            nGreen, sGreen, eGreen, wGreen,
+          })
+        : s.vehicles.map((v) => {
+            const geo = vehicleToRoadGeo(v.x, v.z, v.type, 1);
+            return {
+              id: v.id, type: v.type, x: Number(v.x.toFixed(2)), z: Number(v.z.toFixed(2)),
+              speed: Number((v.speed || 0).toFixed(2)), state: v.state, ble: Boolean(v.ble),
+              lngLat: geo.lngLat, bearing: Number(geo.bearing.toFixed(1)),
+            };
+          });
+
+      setState((prev) => ({
+        ...prev,
+        timestamp: Date.now(),
+        selectedCase: 1,
+        isStandaloneFallback: true,
+        demoMode: s.demoMode,
+        dispatch: s.dispatch ?? null,
+        case2: null,
+        vehicles,
+        signals: {
+          ...prev.signals,
+          phase,
+          signalPhase: phase,
+          eGreen, wGreen, nGreen, sGreen,
+          eYellow, wYellow, nYellow, sYellow,
+          timeRemaining: s.running ? null : Math.ceil(s.cycleTimer),
+          isPreempted,
+        },
+        case1: {
+          isSimulationRunning: s.running,
+          isFrozen: s.frozen,
+          ambulancePosition: c1Pos,
+          ambulanceLngLat: c1Geo.lngLat,
+          ambulanceBearing: c1Geo.bearing,
+          distanceToJunction: Math.max(0, Math.round(0 - s.c1X)),
+        },
+      }));
+      return;
+    }
+
+    if (s.selectedCase === 2) {
+      const c2 = s.case2;
+      const handoff = case2MapSnapshot(c2, s.frozen);
+      const c2Signals = readStandaloneCase2Signals(c2);
+      const vehicles = c2.cars.map((veh) => {
+        const geo = vehicleToRoadGeo(veh.pos.x, veh.pos.z, veh.type, 2);
+        return {
+          id: veh.id,
+          type: veh.type,
+          x: Number(veh.pos.x.toFixed(2)),
+          z: Number(veh.pos.z.toFixed(2)),
+          speed: Number((veh.speed || 0).toFixed(2)),
+          state: veh.speed > 0.25 ? 'MOVING' : 'IDLE_QUEUE',
+          ble: Boolean(veh.receivesBLE),
+          lngLat: geo.lngLat,
+          bearing: Number(geo.bearing.toFixed(1)),
+        };
+      });
+
+      setState((prev) => ({
+        ...prev,
+        timestamp: Date.now(),
+        selectedCase: 2,
+        isStandaloneFallback: true,
+        demoMode: s.demoMode,
+        dispatch: s.dispatch ?? null,
+        case2: handoff,
+        vehicles,
+        signals: {
+          ...prev.signals,
+          ...c2Signals,
+          signalPhase: handoff.phaseLabel,
+          isPreempted: handoff.phase === 'eastGreen' || handoff.phase === 'northGreen',
+        },
+      }));
+      return;
+    }
+
+    const wpName = !s.running
+      ? 'Awaiting Dispatch (M.G. Road East)'
+      : s.c3NormalCycle
+      ? 'Delivered — Normal Traffic Cycle Active'
+      : s.c3Wp === 0
+      ? 'Leg 1: M.G. Rd East -> Turn 1 (Kamaraj Rd)'
+      : s.c3Wp === 1
+      ? 'Leg 2: Kamaraj Rd North -> Turn 2 (Cubbon Rd)'
+      : s.c3Wp === 2
+      ? 'Leg 3: Cubbon Rd West -> Turn 3 (Central St)'
+      : s.c3Wp === 3
+      ? 'Leg 4: Central St South -> Anil Kumble Circle'
+      : 'Leg 5: M.G. Road Westbound Departure (Bypass Complete)';
+
+    const c3GeoA = twinToRoadGeo(2.2, s.c3ZA, { ambId: 'AMB_A' });
+    const c3GeoB = twinToRoadGeo(s.c3XB, s.c3ZB, { ambId: 'AMB_B', wpIdx: s.c3Wp });
+
+    let sGreen = s.running && !s.c3NormalCycle;
+    let nGreen = s.running && !s.c3NormalCycle;
+    let wGreen = false;
+    let eGreen = false;
+    let sYellow = false, nYellow = false, wYellow = false, eYellow = false;
+
+    if (s.running && s.c3NormalCycle) {
+      const isYellow = s.cycleTimer <= 2.5;
+      wGreen = s.cycleArmIdx === 0 && !isYellow;
+      wYellow = s.cycleArmIdx === 0 && isYellow;
+      sGreen = s.cycleArmIdx === 1 && !isYellow;
+      sYellow = s.cycleArmIdx === 1 && isYellow;
+      eGreen = s.cycleArmIdx === 2 && !isYellow;
+      eYellow = s.cycleArmIdx === 2 && isYellow;
+      nGreen = s.cycleArmIdx === 3 && !isYellow;
+      nYellow = s.cycleArmIdx === 3 && isYellow;
+    }
+
+    const isPreempted = s.running && !s.c3NormalCycle;
+    const ambAPos = { x: 2.2, y: 0.55, z: s.c3ZA, rotation: 0 };
+    const vehicles = stepVehicles
+      ? stepStandaloneVehicles(s.vehicles, {
+          caseId: 3,
+          dt,
+          ambPos: ambAPos,
+          isPreempted,
+          nGreen, sGreen, eGreen, wGreen,
+        })
+      : s.vehicles.map((v) => {
+          const geo = vehicleToRoadGeo(v.x, v.z, v.type, 3);
+          return {
+            id: v.id, type: v.type, x: Number(v.x.toFixed(2)), z: Number(v.z.toFixed(2)),
+            speed: Number((v.speed || 0).toFixed(2)), state: v.state, ble: Boolean(v.ble),
+            lngLat: geo.lngLat, bearing: Number(geo.bearing.toFixed(1)),
+          };
+        });
+
+    setState((prev) => ({
+      ...prev,
+      timestamp: Date.now(),
+      selectedCase: 3,
+      isStandaloneFallback: true,
+      demoMode: s.demoMode,
+      dispatch: s.dispatch ?? null,
+      case2: null,
+      vehicles,
+      signals: {
+        ...prev.signals,
+        phase: !s.running ? 'ALL_RED' : s.c3NormalCycle ? 'NORMAL_CYCLE' : 'S_GREEN_CORRIDOR',
+        signalPhase: !s.running
+          ? 'STANDBY — ALL RED'
+          : s.c3NormalCycle
+          ? 'POST-CLEARANCE NORMAL TRAFFIC CYCLE'
+          : 'BRIGADE RD GREEN (AMB A) • KAMARAJ-CUBBON DETOUR (AMB B)',
+        sGreen, nGreen, wGreen, eGreen,
+        eYellow, wYellow, nYellow, sYellow,
+        timeRemaining: Math.ceil(s.cycleTimer),
+        isPreempted,
+      },
+      case3: {
+        ...prev.case3,
+        isSimulationRunning: s.running,
+        isFrozen: s.frozen,
+        deadlockDetected: isPreempted,
+        trafficCycleActive: s.c3NormalCycle,
+        ambulanceA: {
+          ...prev.case3.ambulanceA,
+          status: s.c3ZA <= -40 ? 'DELIVERED' : s.running ? 'CORRIDOR_ACTIVE' : 'IDLE_STANDBY',
+          position: ambAPos,
+          lngLat: c3GeoA.lngLat,
+          bearing: c3GeoA.bearing,
+          distanceToJunction: Math.max(0, Math.round(s.c3ZA)),
+        },
+        ambulanceB: {
+          ...prev.case3.ambulanceB,
+          status: s.c3NormalCycle ? 'DELIVERED' : s.running ? 'DETOUR_ACTIVE' : 'IDLE_STANDBY',
+          position: { x: s.c3XB, y: 0.55, z: s.c3ZB, rotation: 0 },
+          lngLat: c3GeoB.lngLat,
+          bearing: c3GeoB.bearing,
+          currentWaypointIdx: s.c3Wp,
+          waypointName: wpName,
+          detourActive: isPreempted,
+        },
+      },
+    }));
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -580,12 +1238,32 @@ export function useV2XReceiver() {
     let active = true;
     let requestPending = false;
     let lastTimestamp = 0;
+    let lastFallbackTick = performance.now();
+
+    const storedDemo = readStoredDemoMode();
+    if (storedDemo) {
+      standaloneRef.current.demoMode = true;
+      setState((prev) => ({ ...prev, demoMode: true }));
+    }
+
     const receive = (snapshot, local) => {
       if (!active || !snapshot?.timestamp) return;
       if (local) lastLocalPacketRef.current = Date.now();
       if (snapshot.timestamp <= lastTimestamp) return;
       lastTimestamp = snapshot.timestamp;
       lastExternalPacketRef.current = Date.now();
+      if (typeof snapshot.demoMode === 'boolean') {
+        standaloneRef.current.demoMode = snapshot.demoMode;
+      }
+      if ([1, 2, 3].includes(snapshot.selectedCase)) {
+        if (standaloneRef.current.selectedCase !== snapshot.selectedCase) {
+          standaloneRef.current.selectedCase = snapshot.selectedCase;
+          standaloneRef.current.running = false;
+          standaloneRef.current.frozen = false;
+          standaloneRef.current.case2 = createStandaloneCase2();
+          standaloneRef.current.vehicles = createStandaloneVehicles(snapshot.selectedCase);
+        }
+      }
       setState({ ...snapshot, isStandaloneFallback: false });
     };
 
@@ -608,7 +1286,11 @@ export function useV2XReceiver() {
     }
 
     const onStorage = (ev) => {
-      if (ev.key === STORAGE_KEY && ev.newValue) {
+      if (ev.key === DEMO_STORAGE_KEY && ev.newValue != null) {
+        const enabled = ev.newValue === '1';
+        standaloneRef.current.demoMode = enabled;
+        setState((prev) => ({ ...prev, demoMode: enabled }));
+      } else if (ev.key === STORAGE_KEY && ev.newValue) {
         try {
           const parsed = JSON.parse(ev.newValue);
           receive(parsed, true);
@@ -634,107 +1316,57 @@ export function useV2XReceiver() {
 
     // Standalone 20Hz physics fallback loop when `/` is not open in another tab
     const fallbackTimer = setInterval(() => {
+      const now = performance.now();
+      const dt = Math.min(0.25, Math.max(0.01, (now - lastFallbackTick) / 1000));
+      lastFallbackTick = now;
       if (Date.now() - lastExternalPacketRef.current < LIVE_TIMEOUT_MS) return;
 
       const s = standaloneRef.current;
       if (s.frozen) return;
 
       if (s.selectedCase === 1) {
-        let phase = 'ALL_RED';
-        let eGreen = false, wGreen = false, nGreen = false, sGreen = false;
-        let eYellow = false, wYellow = false, nYellow = false, sYellow = false;
-        let isPreempted = false;
-
         if (s.running) {
-          s.c1X += 0.55;
-          if (s.c1X >= -85 && s.c1X < 15) {
-            phase = 'W_GREEN';
-            eGreen = true;
-            wGreen = true;
-            isPreempted = true;
-          } else if (s.c1X >= 15) {
-            phase = 'E_RESUME';
-            eGreen = true;
-          }
+          s.c1X += 11 * dt;
           if (s.c1X > 150) {
             s.c1X = -120;
             s.running = false;
           }
         } else {
           // Keep ordinary traffic moving while the standalone HUD awaits dispatch.
-          s.cycleTimer -= 0.05;
+          s.cycleTimer -= dt;
           if (s.cycleTimer <= 0) {
             s.cycleArmIdx = (s.cycleArmIdx + 1) % 2;
             s.cycleTimer = 15;
           }
-          const avenue = s.cycleArmIdx === 0;
-          const green = s.cycleTimer > 3;
-          const yellow = s.cycleTimer <= 3 && s.cycleTimer > 1;
-          eGreen = wGreen = avenue && green;
-          nGreen = sGreen = !avenue && green;
-          eYellow = wYellow = avenue && yellow;
-          nYellow = sYellow = !avenue && yellow;
-          if (green || yellow) phase = avenue ? 'MG_ROAD' : 'BRIGADE_KAMARAJ';
         }
-
-        const c1Pos = { x: s.c1X, y: 0.5, z: -6.0, rotation: -Math.PI / 2 };
-        const c1Geo = twinToRoadGeo(c1Pos.x, c1Pos.z, { ambId: 'AMB_1' });
-        const vehicles = stepStandaloneVehicles(s.vehicles, {
-          caseId: 1,
-          dt: 0.05,
-          ambPos: c1Pos,
-          isPreempted,
-          nGreen, sGreen, eGreen, wGreen,
-        });
-
-        setState((prev) => ({
-          ...prev,
-          timestamp: Date.now(),
-          selectedCase: 1,
-          isStandaloneFallback: true,
-          dispatch: s.dispatch ?? null,
-          vehicles,
-          signals: {
-            ...prev.signals,
-            phase,
-            signalPhase: phase,
-            eGreen, wGreen, nGreen, sGreen,
-            eYellow, wYellow, nYellow, sYellow,
-            timeRemaining: s.running ? null : Math.ceil(s.cycleTimer),
-            isPreempted,
-          },
-          case1: {
-            isSimulationRunning: s.running,
-            isFrozen: s.frozen,
-            ambulancePosition: c1Pos,
-            ambulanceLngLat: c1Geo.lngLat,
-            ambulanceBearing: c1Geo.bearing,
-            distanceToJunction: Math.max(0, Math.round(0 - s.c1X)),
-          },
-        }));
+        emitStandaloneSnapshot(s, true, dt);
+      } else if (s.selectedCase === 2) {
+        let remaining = dt;
+        while (remaining > 0) {
+          const step = Math.min(remaining, 0.05);
+          stepStandaloneCase2(s.case2, step);
+          remaining -= step;
+        }
+        s.running = s.case2.phase !== 'ready' && s.case2.phase !== 'complete';
+        emitStandaloneSnapshot(s, false, dt);
       } else {
-        let wpName = 'Awaiting Dispatch (M.G. Road East)';
+        const c3Step = 11 * dt;
         if (s.running && !s.c3NormalCycle) {
-          s.c3ZA = Math.max(-120, s.c3ZA - 0.55);
+          s.c3ZA = Math.max(-120, s.c3ZA - c3Step);
           if (s.c3Wp === 0) {
-            wpName = 'Leg 1: M.G. Rd East -> Turn 1 (Kamaraj Rd)';
-            s.c3XB -= 0.55;
+            s.c3XB -= c3Step;
             if (s.c3XB <= 47.0) { s.c3XB = 47.0; s.c3Wp = 1; }
           } else if (s.c3Wp === 1) {
-            wpName = 'Leg 2: Kamaraj Rd North -> Turn 2 (Cubbon Rd)';
-            s.c3ZB -= 0.55;
+            s.c3ZB -= c3Step;
             if (s.c3ZB <= -60.0) { s.c3ZB = -60.0; s.c3Wp = 2; }
           } else if (s.c3Wp === 2) {
-            wpName = 'Leg 3: Cubbon Rd West -> Turn 3 (Central St)';
-            s.c3XB -= 0.55;
+            s.c3XB -= c3Step;
             if (s.c3XB <= -87.0) { s.c3XB = -87.0; s.c3Wp = 3; }
           } else if (s.c3Wp === 3) {
-            wpName = 'Leg 4: Central St South -> Anil Kumble Circle';
-            s.c3ZB += 0.55;
+            s.c3ZB += c3Step;
             if (s.c3ZB >= -2.89) { s.c3ZB = -2.89; s.c3Wp = 4; }
           } else {
-            wpName = 'Leg 5: M.G. Road Westbound Departure (Bypass Complete)';
-            s.c3XB = Math.max(-135, s.c3XB - 0.55);
+            s.c3XB = Math.max(-135, s.c3XB - c3Step);
           }
 
           if (s.c3ZA <= -40 && s.c3Wp === 4 && s.c3XB <= -135) {
@@ -743,85 +1375,13 @@ export function useV2XReceiver() {
             s.cycleTimer = 15.0;
           }
         } else if (s.running && s.c3NormalCycle) {
-          s.cycleTimer -= 0.05;
+          s.cycleTimer -= dt;
           if (s.cycleTimer <= 0) {
             s.cycleArmIdx = (s.cycleArmIdx + 1) % 4;
             s.cycleTimer = 15.0;
           }
-          wpName = 'Delivered — Normal Traffic Cycle Active';
         }
-
-        const c3GeoA = twinToRoadGeo(2.2, s.c3ZA, { ambId: 'AMB_A' });
-        const c3GeoB = twinToRoadGeo(s.c3XB, s.c3ZB, { ambId: 'AMB_B', wpIdx: s.c3Wp });
-
-        let sGreen = s.running && !s.c3NormalCycle;
-        let nGreen = s.running && !s.c3NormalCycle;
-        let wGreen = false;
-        let eGreen = false;
-
-        if (s.running && s.c3NormalCycle) {
-          wGreen = s.cycleArmIdx === 0;
-          sGreen = s.cycleArmIdx === 1;
-          eGreen = s.cycleArmIdx === 2;
-          nGreen = s.cycleArmIdx === 3;
-        }
-
-        const isPreempted = s.running && !s.c3NormalCycle;
-        const ambAPos = { x: 2.2, y: 0.55, z: s.c3ZA, rotation: 0 };
-        const vehicles = stepStandaloneVehicles(s.vehicles, {
-          caseId: 3,
-          dt: 0.05,
-          ambPos: ambAPos,
-          isPreempted,
-          nGreen, sGreen, eGreen, wGreen,
-        });
-
-        setState((prev) => ({
-          ...prev,
-          timestamp: Date.now(),
-          selectedCase: 3,
-          isStandaloneFallback: true,
-          dispatch: s.dispatch ?? null,
-          vehicles,
-          signals: {
-            ...prev.signals,
-            phase: !s.running ? 'ALL_RED' : s.c3NormalCycle ? 'NORMAL_CYCLE' : 'S_GREEN_CORRIDOR',
-            signalPhase: !s.running
-              ? 'STANDBY — ALL RED'
-              : s.c3NormalCycle
-              ? 'POST-CLEARANCE NORMAL TRAFFIC CYCLE'
-              : 'BRIGADE RD GREEN (AMB A) • KAMARAJ-CUBBON DETOUR (AMB B)',
-            sGreen, nGreen, wGreen, eGreen,
-            eYellow: false, wYellow: false, nYellow: false, sYellow: false,
-            timeRemaining: Math.ceil(s.cycleTimer),
-            isPreempted,
-          },
-          case3: {
-            ...prev.case3,
-            isSimulationRunning: s.running,
-            isFrozen: s.frozen,
-            deadlockDetected: isPreempted,
-            trafficCycleActive: s.c3NormalCycle,
-            ambulanceA: {
-              ...prev.case3.ambulanceA,
-              status: s.c3ZA <= -40 ? 'DELIVERED' : s.running ? 'CORRIDOR_ACTIVE' : 'IDLE_STANDBY',
-              position: ambAPos,
-              lngLat: c3GeoA.lngLat,
-              bearing: c3GeoA.bearing,
-              distanceToJunction: Math.max(0, Math.round(s.c3ZA)),
-            },
-            ambulanceB: {
-              ...prev.case3.ambulanceB,
-              status: s.c3NormalCycle ? 'DELIVERED' : s.running ? 'DETOUR_ACTIVE' : 'IDLE_STANDBY',
-              position: { x: s.c3XB, y: 0.55, z: s.c3ZB, rotation: 0 },
-              lngLat: c3GeoB.lngLat,
-              bearing: c3GeoB.bearing,
-              currentWaypointIdx: s.c3Wp,
-              waypointName: wpName,
-              detourActive: isPreempted,
-            },
-          },
-        }));
+        emitStandaloneSnapshot(s, true, dt);
       }
     }, 50);
 
@@ -832,12 +1392,15 @@ export function useV2XReceiver() {
       clearInterval(fallbackTimer);
       clearInterval(netPollInterval);
     };
-  }, []);
+  }, [emitStandaloneSnapshot]);
 
   const sendCommand = useCallback((action, extra = {}) => {
     const cmd = { action, ...extra, ts: Date.now() };
+    if (action === 'SET_DEMO_MODE') {
+      writeStoredDemoMode(Boolean(extra.enabled));
+    }
     if (Date.now() - lastExternalPacketRef.current < LIVE_TIMEOUT_MS) {
-      if (Date.now() - lastLocalPacketRef.current < 350) {
+      if (lastLocalPacketRef.current > 0 && Date.now() - lastLocalPacketRef.current < LIVE_TIMEOUT_MS) {
         try {
           if ('BroadcastChannel' in window) {
             const bc = new BroadcastChannel(CHANNEL_NAME);
@@ -860,14 +1423,10 @@ export function useV2XReceiver() {
     }
 
     const s = standaloneRef.current;
-    if (action === 'FREEZE') {
-      s.frozen = !s.frozen;
-      const caseKey = s.selectedCase === 1 ? 'case1' : 'case3';
-      setState(prev => ({ ...prev, [caseKey]: { ...prev[caseKey], isFrozen: s.frozen } }));
-    } else if (action === 'SWITCH_CASE') {
-      s.selectedCase = extra.caseId || 1;
+    const resetStandaloneCase = (targetCase, running = false) => {
+      s.selectedCase = targetCase;
       s.dispatch = null;
-      s.running = false;
+      s.running = running;
       s.frozen = false;
       s.c1X = -120;
       s.c3ZA = 90;
@@ -877,9 +1436,34 @@ export function useV2XReceiver() {
       s.c3NormalCycle = false;
       s.cycleArmIdx = 0;
       s.cycleTimer = 15;
-      s.vehicles = createStandaloneVehicles(s.selectedCase);
+      s.case2 = targetCase === 2 && running
+        ? { ...createStandaloneCase2(), phase: 'approach', northStatus: 'Approaching the junction' }
+        : createStandaloneCase2();
+      s.vehicles = createStandaloneVehicles(targetCase);
+    };
+
+    if (action === 'SET_DEMO_MODE') {
+      s.demoMode = Boolean(extra.enabled);
+      writeStoredDemoMode(s.demoMode);
+      emitStandaloneSnapshot(s);
+    } else if (action === 'FREEZE') {
+      s.frozen = !s.frozen;
+      emitStandaloneSnapshot(s);
+    } else if (action === 'SWITCH_CASE' && [1, 2, 3].includes(extra.caseId)) {
+      resetStandaloneCase(extra.caseId, false);
+      emitStandaloneSnapshot(s);
+    } else if (action === 'DISPATCH_CASE2') {
+      resetStandaloneCase(2, true);
+      emitStandaloneSnapshot(s);
+    } else if (action === 'DISPATCH_DEMO') {
+      const target = [1, 2, 3].includes(extra.caseId) ? extra.caseId : s.selectedCase;
+      resetStandaloneCase(target, true);
+      emitStandaloneSnapshot(s);
+    } else if (action === 'RESET_DEMO') {
+      resetStandaloneCase(s.selectedCase, false);
+      emitStandaloneSnapshot(s);
     }
-  }, []);
+  }, [emitStandaloneSnapshot]);
 
   const startDispatch = useCallback(async dispatch => {
     if (Date.now() - lastExternalPacketRef.current < LIVE_TIMEOUT_MS) {
@@ -903,9 +1487,10 @@ export function useV2XReceiver() {
     Object.assign(s, {
       selectedCase: dispatch.caseId, dispatch, running: true, frozen: false,
       c1X: -120, c3ZA: 90, c3XB: 90, c3ZB: -2.89, c3Wp: 0, c3NormalCycle: false,
-      cycleArmIdx: 0, cycleTimer: 15, vehicles: createStandaloneVehicles(dispatch.caseId),
+      cycleArmIdx: 0, cycleTimer: 15, case2: createStandaloneCase2(), vehicles: createStandaloneVehicles(dispatch.caseId),
     });
-  }, []);
+    emitStandaloneSnapshot(s);
+  }, [emitStandaloneSnapshot]);
 
   return { state, sendCommand, startDispatch };
 }

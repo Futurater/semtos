@@ -18,14 +18,18 @@ export function TrafficManager({ selectedCase = 1, ambulancePosition, isPreempte
   // ── ROAD BOUNDARIES (FOOTPATH PROTECTION) ──
   const [boundaries, setBoundaries] = useState(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('semtos_boundaries');
-      if (saved) return JSON.parse(saved);
+      try {
+        const saved = localStorage.getItem('semtos_boundaries');
+        if (saved) return JSON.parse(saved);
+      } catch (_) {}
     }
     return TRAFFIC_ROAD_EDGES;
   });
 
   useEffect(() => {
-    localStorage.setItem('semtos_boundaries', JSON.stringify(boundaries));
+    try {
+      localStorage.setItem('semtos_boundaries', JSON.stringify(boundaries));
+    } catch (_) {}
   }, [boundaries]);
 
   const car1 = useGLTF('/car1.glb');
@@ -241,6 +245,7 @@ export function TrafficManager({ selectedCase = 1, ambulancePosition, isPreempte
 
   useFrame((state, delta) => {
     if (boundaryMode || isFrozen) return;
+    const dt = Math.min(delta, 0.05);
 
     if (case2) {
       const { phase, northStatus } = case2;
@@ -252,10 +257,9 @@ export function TrafficManager({ selectedCase = 1, ambulancePosition, isPreempte
         stepCase2(case2, step);
         remaining -= step;
       }
-      if (case2.phase !== phase || case2.northStatus !== northStatus ||
-        `${case2.traffic?.index}/${case2.traffic?.stage}` !== trafficPhase) {
-        onCase2Change();
-      }
+      const changed = case2.phase !== phase || case2.northStatus !== northStatus ||
+        `${case2.traffic?.index}/${case2.traffic?.stage}` !== trafficPhase;
+      onCase2Change(changed);
     }
 
     const ambPos = new THREE.Vector3(ambulancePosition.x, 0, ambulancePosition.z);
@@ -471,8 +475,8 @@ export function TrafficManager({ selectedCase = 1, ambulancePosition, isPreempte
       // ══════════════════════════════════════════════════════════════════
       // 6. PHYSICS
       // ══════════════════════════════════════════════════════════════════
-      veh.speed = THREE.MathUtils.lerp(veh.speed, targetSpeed, delta * 4.5);
-      veh.pos[veh.axis] += veh.speed * delta * veh.sign;
+      veh.speed = THREE.MathUtils.lerp(veh.speed, targetSpeed, dt * 4.5);
+      veh.pos[veh.axis] += veh.speed * dt * veh.sign;
 
       // Wrap-around: car exits the road, re-enter at spawn point driving
       if (veh.sign === 1 && veh.pos[veh.axis] > veh.wrapPos) {
@@ -532,8 +536,8 @@ export function TrafficManager({ selectedCase = 1, ambulancePosition, isPreempte
           steerTarget = (targetDelta > 0 ? 0.15 : -0.15) * veh.sign;
         }
       }
-      veh.rotY = THREE.MathUtils.lerp(veh.rotY, steerTarget, delta * 2.5);
-      veh.pos[veh.perpAxis] = THREE.MathUtils.lerp(veh.pos[veh.perpAxis], safeTargetPerp, delta * 1.2);
+      veh.rotY = THREE.MathUtils.lerp(veh.rotY, steerTarget, dt * 2.5);
+      veh.pos[veh.perpAxis] = THREE.MathUtils.lerp(veh.pos[veh.perpAxis], safeTargetPerp, dt * 1.2);
 
       // Absolute footpath clamp (last resort boundary enforcement)
       if (selectedCase === 3) {

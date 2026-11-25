@@ -4,7 +4,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import OperationsHeader, { MapCredit } from '../../../components/OperationsHeader';
 import { streetStyle, addTrafficLayer } from '../../../components/corridorMap';
-import { Navigation, Crosshair, Volume2, VolumeX, ArrowUpRight } from 'lucide-react';
+import { Navigation, Crosshair, Volume2, VolumeX } from 'lucide-react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
@@ -164,6 +164,7 @@ function create2DAmbulanceElement(label, borderColor, badgeBg) {
     font-family:monospace;font-size:9px;font-weight:900;
     padding:1px 6px;border-radius:4px;box-shadow:0 2px 6px rgba(0,0,0,0.7);
   `;
+  tag.className = 'ambulance-marker-label';
   tag.innerText = label;
 
   wrapper.appendChild(pulse);
@@ -221,21 +222,27 @@ export default function CivilianDriverPhoneHUD() {
   useEffect(() => { followMeRef.current = followMe; }, [followMe]);
 
   const single = state.selectedCase === 1;
-  const running = single ? state.case1?.isSimulationRunning : state.case3?.isSimulationRunning && !state.case3?.trafficCycleActive;
-  const posA = single ? state.case1?.ambulancePosition : state.case3?.ambulanceA?.position;
-  const posB = state.case3?.ambulanceB?.position;
+  const handoff = state.selectedCase === 2 ? state.case2 : null;
+  const running = handoff ? handoff.isSimulationRunning : single ? state.case1?.isSimulationRunning :
+    state.case3?.isSimulationRunning && !state.case3?.trafficCycleActive;
+  const posA = handoff?.east?.position ?? (single ? state.case1?.ambulancePosition : state.case3?.ambulanceA?.position);
+  const posB = handoff?.north?.position ?? state.case3?.ambulanceB?.position;
   const leg = state.case3?.ambulanceB?.currentWaypointIdx ?? 0;
-  const geoA = twinToRoadGeo(posA?.x, posA?.z, { ambId: single ? 'AMB_1' : 'AMB_A' });
-  const geoB = single ? null : twinToRoadGeo(posB?.x, posB?.z, { ambId: 'AMB_B', wpIdx: leg });
-  const cubbon = !single && activePreset.corridorId === 'CUBBON_ROAD';
-  const sameCorridor = single ? activePreset.corridorId === 'MG_ROAD' :
-    activePreset.corridorId === 'BRIGADE_ROAD' || (cubbon && leg === 2);
+  const geoA = handoff?.east ?? twinToRoadGeo(posA?.x, posA?.z, { ambId: single ? 'AMB_1' : 'AMB_A' });
+  const geoB = handoff?.north ?? (single ? null : twinToRoadGeo(posB?.x, posB?.z, { ambId: 'AMB_B', wpIdx: leg }));
+  const cubbon = state.selectedCase === 3 && activePreset.corridorId === 'CUBBON_ROAD';
+  const onAvenue = activePreset.corridorId === 'MG_ROAD';
+  const onBrigade = activePreset.corridorId === 'BRIGADE_ROAD';
+  const tracksSecond = cubbon || Boolean(handoff && onBrigade);
+  const sameCorridor = handoff ? onAvenue || onBrigade : single ? onAvenue : onBrigade || (cubbon && leg === 2);
   const driver = animTargetsRef.current.driver;
-  const hasPassed = single ? posA?.x > driver.x + 5 :
+  const hasPassed = handoff ? (onBrigade ? posB?.z <= driver.z - 4 : posA?.x > driver.x + 5) :
+    single ? posA?.x > driver.x + 5 :
     cubbon ? leg > 2 || (leg === 2 && posB?.x <= driver.x - 4) : posA?.z <= driver.z - 4;
   const passedHere = running && (sameCorridor || cubbon) && hasPassed;
-  const unitName = state.dispatch?.units[cubbon ? 1 : 0]?.vehicleId || (single ? 'Ambulance 108' : cubbon ? 'Unit B' : 'Unit A');
-  const distanceMeters = Math.round(haversineMeters(driverLiveLngLat, (cubbon ? geoB : geoA).lngLat));
+  const unitName = handoff ? (tracksSecond ? 'Northbound ambulance' : 'Eastbound ambulance') :
+    state.dispatch?.units?.[tracksSecond ? 1 : 0]?.vehicleId || (single ? 'Ambulance 108' : cubbon ? 'Unit B' : 'Unit A');
+  const distanceMeters = Math.round(haversineMeters(driverLiveLngLat, (tracksSecond ? geoB : geoA).lngLat));
   const isEmergencyNear = Boolean(running && sameCorridor && !hasPassed && distanceMeters <= 260);
   const subBanner = passedHere ? 'The unit has cleared your position. Resume when the signal permits.' :
     sameCorridor ? unitName + ' is ' + distanceMeters + ' m behind you.' : 'The response unit is on another approach.';
@@ -343,7 +350,7 @@ export default function CivilianDriverPhoneHUD() {
 
           if (Math.abs(entry.curLngLat[0] - entry.targetLngLat[0]) < 1e-8 &&
               Math.abs(entry.curLngLat[1] - entry.targetLngLat[1]) < 1e-8 &&
-              Math.abs(lerpAngleDeg(entry.curBearing, entry.targetBearing, 1) - entry.curBearing) < 0.1) return;
+              Math.abs(((entry.targetBearing - entry.curBearing + 540) % 360) - 180) < 0.1) return;
 
           entry.curLngLat = [
             entry.curLngLat[0] + (entry.targetLngLat[0] - entry.curLngLat[0]) * t,
@@ -383,7 +390,7 @@ export default function CivilianDriverPhoneHUD() {
         const p = presetRef.current;
         const drv = targets.driver;
         const sig = st.signals || {};
-        const isFrozen = st.selectedCase === 1 ? st.case1?.isFrozen : st.case3?.isFrozen;
+        const isFrozen = (st.selectedCase === 2 ? st.case2 : st.selectedCase === 1 ? st.case1 : st.case3)?.isFrozen;
 
         if (!isFrozen) {
           const onCubbon = p.corridorId === 'CUBBON_ROAD';
@@ -396,7 +403,7 @@ export default function CivilianDriverPhoneHUD() {
           const axisVal = eastWest ? drv.x : drv.z;
           const sign = (p.type === 'E' || p.type === 'S') ? 1 : -1;
           const distStop = (p.stopLine - axisVal) * sign;
-          const inJunc = drv.x > -5 && drv.x < 3.5 && drv.z > -9.5 && drv.z < 9.5;
+          const inJunc = !onCubbon && drv.x > -5 && drv.x < 3.5 && drv.z > -9.5 && drv.z < 9.5;
 
           let targetSpd = 0;
           let targetPerp = eastWest ? p.initZ : p.initX;
@@ -535,6 +542,10 @@ export default function CivilianDriverPhoneHUD() {
     });
 
     // 2. Update Ambulance Targets
+    const labelA = ambMarkerARef.current?.getElement().querySelector('.ambulance-marker-label');
+    const labelB = ambMarkerBRef.current?.getElement().querySelector('.ambulance-marker-label');
+    if (labelA) labelA.textContent = state.selectedCase === 2 ? 'Eastbound' : state.selectedCase === 1 ? 'AMB-108' : 'AMB-A';
+    if (labelB) labelB.textContent = state.selectedCase === 2 ? 'Northbound' : 'AMB-B';
     if (geoA?.lngLat) {
       if (targets.ambA.targetLngLat && haversineMeters(targets.ambA.targetLngLat, geoA.lngLat) > 80) {
         targets.ambA.curLngLat = null;
@@ -544,9 +555,9 @@ export default function CivilianDriverPhoneHUD() {
       targets.ambA.targetBearing = geoA.bearing || 0;
       targets.ambA.visible = true;
     }
-    if (geoB?.lngLat && state.selectedCase === 3) {
+    if (geoB?.lngLat) {
       if (!targets.ambB.visible ||
-          haversineMeters(targets.ambB.targetLngLat, geoB.lngLat) > 80) {
+          (targets.ambB.targetLngLat && haversineMeters(targets.ambB.targetLngLat, geoB.lngLat) > 80)) {
         targets.ambB.curLngLat = null;
         targets.ambB.curBearing = geoB.bearing;
       }
@@ -583,15 +594,19 @@ export default function CivilianDriverPhoneHUD() {
     }
   }, [state, mapReady, geoA?.lngLat, geoA?.bearing, geoB?.lngLat, geoB?.bearing]);
 
-  const nextCase = state.selectedCase === 1 ? 3 : 1;
   const road = ['Brigade Road', 'Kamaraj Road', 'Mahatma Gandhi Road', 'Cubbon Road'][presetIdx];
   const direction = { N: 'Northbound', S: 'Southbound', E: 'Eastbound', W: 'Westbound' }[activePreset.type];
   const notice = isEmergencyNear ? 'Move to the curb' : passedHere ? 'Ambulance has passed' :
     running ? 'Monitoring your lane' : 'Lane clear';
   const toggleCamera = () => {
-    setFollowMe(!followMe);
-    mapRef.current?.flyTo({ center: followMe ? [ORIGIN_LNG, ORIGIN_LAT] : driverLiveLngLat,
-      zoom: followMe ? 17 : 17.8, duration: 350 });
+    const next = !followMe;
+    setFollowMe(next);
+    if (next) {
+      mapRef.current?.setZoom(17.8);
+      mapRef.current?.setCenter(driverLiveLngLat);
+    } else {
+      mapRef.current?.flyTo({ center: [ORIGIN_LNG, ORIGIN_LAT], zoom: 17, duration: 350 });
+    }
   };
   return <main className="operations map-workspace">
     <OperationsHeader active="/driver" />
@@ -603,7 +618,7 @@ export default function CivilianDriverPhoneHUD() {
         </div>
         <section className={'advisory ' + (isEmergencyNear ? 'urgent' : '')} aria-live="polite">
           <div><i className="status-dot"/><strong>{notice}</strong></div>
-          <p>{running ? subBanner : 'Monitoring the corridor for approaching ambulances.'}</p>
+          <p>{running ? subBanner : handoff?.phaseLabel || 'Monitoring the corridor for approaching ambulances.'}</p>
         </section>
         <div className="drive-controls">
           <div className="readings"><div><small>Traffic feed</small><strong><i className="status-dot"/>{state.isStandaloneFallback ? 'Standalone' : 'Twin live'}</strong></div>
@@ -614,8 +629,53 @@ export default function CivilianDriverPhoneHUD() {
             {['Brigade Road · Northbound','Kamaraj Road · Southbound','M.G. Road · Eastbound','Cubbon Road · Westbound'].map((name,i) => <option key={name} value={i}>{name}</option>)}
           </select></label>
           <div className="action-row">
-            <button className="icon-action" aria-label="Voice alerts" aria-pressed={voiceEnabled} onClick={() => setVoiceEnabled(!voiceEnabled)}>{voiceEnabled ? <Volume2 size={18}/> : <VolumeX size={18}/>}</button></div>
-          <button className="text-action" onClick={() => sendCommand('SWITCH_CASE', { caseId: nextCase })}>Switch to case 0{nextCase} <ArrowUpRight size={14}/></button>
+            <button className="icon-action" aria-label="Voice alerts" aria-pressed={voiceEnabled} onClick={() => setVoiceEnabled(!voiceEnabled)}>{voiceEnabled ? <Volume2 size={18}/> : <VolumeX size={18}/>}</button>
+            <button
+              type="button"
+              className="demo-toggle"
+              aria-pressed={Boolean(state.demoMode)}
+              onClick={() => sendCommand('SET_DEMO_MODE', { enabled: !state.demoMode })}
+            >
+              Demo mode: {state.demoMode ? 'On' : 'Off'}
+            </button>
+          </div>
+          {(state.demoMode || state.selectedCase === 2) && (
+            <div className="action-row">
+              <button
+                type="button"
+                className="primary-action"
+                disabled={state.selectedCase === 2 ? Boolean(handoff?.isSimulationRunning) : Boolean(running)}
+                onClick={() => sendCommand(state.selectedCase === 2 ? 'DISPATCH_CASE2' : 'DISPATCH_DEMO', { caseId: state.selectedCase })}
+              >
+                {state.selectedCase === 2
+                  ? (handoff?.phase === 'complete' ? 'Run handoff again' : handoff?.isSimulationRunning ? 'Handoff running' : 'Run handoff')
+                  : running ? 'Demo running' : (state.selectedCase === 3 && state.case3?.trafficCycleActive) ? 'Run demo again' : 'Run demo'}
+              </button>
+              {(state.selectedCase === 2 ? Boolean(handoff?.isSimulationRunning) : Boolean(state.case1?.isSimulationRunning || state.case3?.isSimulationRunning)) && (
+                <button
+                  type="button"
+                  className="queue-secondary"
+                  onClick={() => sendCommand('FREEZE')}
+                >
+                  {(state.selectedCase === 2 ? handoff?.isFrozen : state.selectedCase === 1 ? state.case1?.isFrozen : state.case3?.isFrozen) ? 'Resume' : 'Pause'}
+                </button>
+              )}
+              {(state.selectedCase === 2 ? (handoff?.phase && handoff.phase !== 'ready') : Boolean(state.case1?.isSimulationRunning || state.case3?.isSimulationRunning)) && (
+                <button
+                  type="button"
+                  className="queue-secondary"
+                  onClick={() => sendCommand('RESET_DEMO')}
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+          )}
+          <label className="field">Scenario<select value={state.selectedCase} onChange={e => sendCommand('SWITCH_CASE', { caseId: Number(e.target.value) })}>
+            <option value={1}>01 · Priority corridor</option>
+            <option value={2}>02 · Priority handoff</option>
+            <option value={3}>03 · Dual response</option>
+          </select></label>
         </div>
       </aside>
       <section className="map-stage" aria-label="Live commuter map"><div className="map-canvas" ref={mapContainerRef}/>

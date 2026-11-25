@@ -28,6 +28,7 @@ export function useTrafficStream(useMockData = true) {
   const avenueEventFiredRef  = useRef(false);
   const clearedEventFiredRef = useRef(false);
   const xRef                 = useRef(AMB_START_X);
+  const lastTickRef          = useRef(0);
 
   const update = useCallback((patch) => {
     setState(prev => ({ ...prev, ...patch }));
@@ -59,15 +60,30 @@ export function useTrafficStream(useMockData = true) {
     avenueEventFiredRef.current  = false;
     clearedEventFiredRef.current = false;
     xRef.current = AMB_START_X;
+    lastTickRef.current = performance.now();
     addLog('Ambulance dispatched — heading East on Main Avenue.');
     update({ isSimulationRunning: true, isFrozen: false });
   }, [addLog, update]);
 
   const toggleFreeze = useCallback(() => {
     isFrozenRef.current = !isFrozenRef.current;
+    if (!isFrozenRef.current) lastTickRef.current = performance.now();
     update({ isFrozen: isFrozenRef.current });
     addLog('System ' + (isFrozenRef.current ? 'FROZEN' : 'UNFROZEN') + '.');
   }, [addLog, update]);
+
+  const resetCase1 = useCallback(() => {
+    simRunningRef.current = false;
+    isFrozenRef.current = false;
+    avenueEventFiredRef.current = false;
+    clearedEventFiredRef.current = false;
+    xRef.current = AMB_START_X;
+    update({
+      isSimulationRunning: false,
+      isFrozen: false,
+      ambulancePosition: { x: AMB_START_X, y: 0.5, z: AMB_LANE_Z, rotation: -Math.PI / 2 },
+    });
+  }, [update]);
 
   useEffect(() => {
     if (!useMockData) return;
@@ -91,10 +107,14 @@ export function useTrafficStream(useMockData = true) {
   // Ambulance movement loop
   useEffect(() => {
     if (!useMockData) return;
+    lastTickRef.current = performance.now();
     addLog('System ready. Complete ambulance intake to dispatch.');
     const interval = setInterval(() => {
+      const now = performance.now();
+      const dt = Math.min(1.5, Math.max(0.01, (now - (lastTickRef.current || now)) / 1000));
+      lastTickRef.current = now;
       if (!simRunningRef.current || isFrozenRef.current) return;
-      xRef.current += AMB_SPEED_DX;
+      xRef.current += CASE1_AMBULANCE_SPEED * dt;
       const x = xRef.current;
 
       if (!avenueEventFiredRef.current && x >= AVE_ENTRY_X) {
@@ -131,5 +151,6 @@ export function useTrafficStream(useMockData = true) {
     registerCallbacks,
     dispatchCase1,
     toggleFreeze,
+    resetCase1,
   };
 }

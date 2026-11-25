@@ -29,8 +29,8 @@ export default function HospitalsPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(Object.fromEntries(new FormData(form))),
       });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error);
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'The departure could not be registered.');
       setReceipt(result.departure);
       form.reset();
     } catch (issue) {

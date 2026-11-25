@@ -1,4 +1,4 @@
-import React, { Suspense, useRef, useState, useEffect, useMemo } from 'react';
+import React, { Suspense, useRef, useState, useEffect, useMemo, useCallback } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Html, useProgress, PointerLockControls, TransformControls, useGLTF, Center, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -80,7 +80,7 @@ export function FreeRoamFlightCamera({ editing = false } = {}) {
       if (e.code === 'KeyS' || e.code === 'ArrowDown') keys.current.s = true;
       if (e.code === 'KeyA' || e.code === 'ArrowLeft') keys.current.a = true;
       if (e.code === 'KeyD' || e.code === 'ArrowRight') keys.current.d = true;
-      if (e.code === 'Space' || (!editing && e.code === 'KeyE')) keys.current.space = true;
+      if (e.code === 'Space') keys.current.space = true;
       if (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'KeyQ') keys.current.shift = true;
     };
 
@@ -398,6 +398,8 @@ function NeonDetourSegment({ position, rotation, length, width = 1.9, baseTextur
     return t;
   }, [baseTexture, length]);
 
+  useEffect(() => () => { tex?.dispose(); }, [tex]);
+
   useFrame((_, delta) => {
     if (tex) {
       tex.offset.y -= delta * 1.5;
@@ -453,6 +455,8 @@ function NeonDetourRibbon() {
     tex.wrapT = THREE.RepeatWrapping;
     return tex;
   }, []);
+
+  useEffect(() => () => { baseTexture?.dispose(); }, [baseTexture]);
 
   if (!baseTexture) return null;
 
@@ -666,17 +670,18 @@ export function Canvas3D({
     setLocalCamMode(activeCamFollow);
   }, [activeCamFollow]);
 
-  const setCameraMode = (mode) => {
+  const setCameraMode = useCallback((mode) => {
     setLocalCamMode(mode);
     setIsRoadCam(false);
     setIsFreeRoam(false);
     setBoundaryMode(false);
     if (onSetCamFollow) onSetCamFollow(mode);
-  };
+  }, [onSetCamFollow]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.target?.closest?.('input, textarea, select, dialog, [contenteditable]')) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.code === 'KeyV' || e.key === 'v' || e.key === 'V') {
         setIsRoadCam((prev) => !prev);
         setIsFreeRoam(false);
@@ -696,7 +701,7 @@ export function Canvas3D({
         setCameraMode('overview');
       }
       if (e.code === 'KeyE' || e.key === 'e' || e.key === 'E') {
-        if (!e.repeat && !e.target?.closest?.('input,select,textarea,[contenteditable]')) onEditScenario?.();
+        if (!e.repeat) onEditScenario?.();
       }
       if (e.code === 'KeyB' || e.key === 'b' || e.key === 'B') {
         setBoundaryMode(prev => !prev);
@@ -705,7 +710,7 @@ export function Canvas3D({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onSetCamFollow, onEditScenario]);
+  }, [setCameraMode, onEditScenario]);
 
   const showOrbitControls = boundaryMode;
 
